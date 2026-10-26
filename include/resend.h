@@ -252,7 +252,8 @@ typedef struct {
 /*
  * secret is the signing secret, including the "whsec_" prefix.
  * svix_signature may contain more than one space-separated "v1," value.
- * Rejects a timestamp outside five minutes of now.
+ * Rejects a timestamp outside five minutes of now. Callers that need
+ * once-only delivery record svix ids themselves.
  * On success, *out is filled and must be passed to resend_event_free.
  */
 int resend_webhook_verify(const char *secret, const char *svix_id, const char *svix_timestamp,
