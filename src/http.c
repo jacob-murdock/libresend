@@ -6,6 +6,101 @@
 #include <string.h>
 #include <strings.h>
 
+/* RFC 3986 unreserved characters stay literal. Everything else is %XX. */
+static int put_pct(resend_buf *b, const char *s) {
+    static const char hex[] = "0123456789ABCDEF";
+    if (!s)
+        return -1;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        unsigned char c = *p;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
+            c == '_' || c == '.' || c == '~') {
+            if (resend_buf_putc(b, (char)c) != 0)
+                return -1;
+        } else if (resend_buf_putc(b, '%') != 0 || resend_buf_putc(b, hex[c >> 4]) != 0 ||
+                   resend_buf_putc(b, hex[c & 0xf]) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int query_param(resend_buf *q, int *first, const char *key, const char *value) {
+    if (!value)
+        return 0;
+    if (*first) {
+        if (resend_buf_putc(q, '?') != 0)
+            return -1;
+        *first = 0;
+    } else if (resend_buf_putc(q, '&') != 0) {
+        return -1;
+    }
+    if (resend_buf_puts(q, key) != 0 || resend_buf_putc(q, '=') != 0)
+        return -1;
+    return put_pct(q, value);
+}
+
+int resend_path_with_page(resend *client, const char *prefix, const resend_page *page, char **out) {
+    if (!out)
+        return -1;
+    *out = NULL;
+    if (!client || !prefix)
+        return -1;
+    if (page && page->after && page->before) {
+        resend_error_set(client, 0, NULL, "after and before cannot be combined");
+        return -1;
+    }
+
+    resend_buf path;
+    resend_buf_init(&path);
+    if (resend_buf_puts(&path, prefix) != 0)
+        goto oom;
+
+    if (page) {
+        int first = 1;
+        if (query_param(&path, &first, "after", page->after) != 0)
+            goto oom;
+        if (query_param(&path, &first, "before", page->before) != 0)
+            goto oom;
+        if (page->limit > 0) {
+            char lim[32];
+            snprintf(lim, sizeof lim, "%zu", page->limit);
+            if (query_param(&path, &first, "limit", lim) != 0)
+                goto oom;
+        }
+    }
+
+    if (!path.data)
+        goto oom;
+    *out = path.data;
+    return 0;
+oom:
+    resend_buf_free(&path);
+    resend_error_set(client, 0, NULL, "out of memory");
+    return -1;
+}
+
+int resend_path_with_id(resend *client, const char *prefix, const char *id, const char *suffix,
+                        char **out) {
+    if (!out)
+        return -1;
+    *out = NULL;
+    if (!client || !prefix || !id)
+        return -1;
+
+    resend_buf path;
+    resend_buf_init(&path);
+    if (resend_buf_puts(&path, prefix) != 0 || put_pct(&path, id) != 0 ||
+        (suffix && suffix[0] && resend_buf_puts(&path, suffix) != 0) || !path.data)
+        goto oom;
+    *out = path.data;
+    return 0;
+oom:
+    resend_buf_free(&path);
+    resend_error_set(client, 0, NULL, "out of memory");
+    return -1;
+}
+
 void resend_http_response_free(resend_http_response *r) {
     if (!r)
         return;
@@ -54,10 +149,33 @@ static size_t header_cb(char *buf, size_t size, size_t nitems, void *userdata) {
     return n;
 }
 
+/* Curl copies CR and LF from these strings into the request. */
+static int no_ctl(const char *s) {
+    if (!s)
+        return 1;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        if (*p < 0x20 || *p == 0x7f)
+            return 0;
+    }
+    return 1;
+}
+
 int resend_http_json(resend *client, const char *method, const char *path, const char *body,
                      const char *idempotency_key, resend_http_response *out) {
     memset(out, 0, sizeof *out);
     resend_buf_init(&out->body);
+    if (!no_ctl(client->base_url)) {
+        resend_error_set(client, 0, NULL, "base url contains a control character");
+        return -1;
+    }
+    if (!no_ctl(client->api_key)) {
+        resend_error_set(client, 0, NULL, "api key contains a control character");
+        return -1;
+    }
+    if (!no_ctl(idempotency_key)) {
+        resend_error_set(client, 0, NULL, "idempotency key contains a control character");
+        return -1;
+    }
 
     size_t url_len = strlen(client->base_url) + strlen(path) + 1;
     char *url = malloc(url_len);
@@ -119,6 +237,8 @@ int resend_http_json(resend *client, const char *method, const char *path, const
     struct header_ctx hctx = {.drop_to_http = 0};
 
     curl_easy_setopt(easy, CURLOPT_URL, url);
+    /* Email ids are one path segment. Do not let curl squash "." or "..". */
+    curl_easy_setopt(easy, CURLOPT_PATH_AS_IS, 1L);
     curl_easy_setopt(easy, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(easy, CURLOPT_CUSTOMREQUEST, method);
     if (body) {

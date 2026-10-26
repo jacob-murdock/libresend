@@ -99,13 +99,63 @@ int json_tag_array(resend_buf *b, const resend_pair *tags, size_t count) {
     return json_array_end(b);
 }
 
-static const char *skip_ws(const char *p, const char *end) {
+const char *json_skip_ws(const char *p, const char *end) {
     while (p < end && isspace((unsigned char)*p))
         p++;
     return p;
 }
 
-static int parse_string(const char *p, const char *end, char **out, const char **next) {
+enum { JSON_MAX_DEPTH = 64 };
+
+static int put_utf8(resend_buf *b, unsigned int cp) {
+    unsigned char tmp[4];
+    size_t n;
+    if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+        return -1;
+    if (cp < 0x80) {
+        tmp[0] = (unsigned char)cp;
+        n = 1;
+    } else if (cp < 0x800) {
+        tmp[0] = (unsigned char)(0xC0 | (cp >> 6));
+        tmp[1] = (unsigned char)(0x80 | (cp & 0x3F));
+        n = 2;
+    } else if (cp < 0x10000) {
+        tmp[0] = (unsigned char)(0xE0 | (cp >> 12));
+        tmp[1] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        tmp[2] = (unsigned char)(0x80 | (cp & 0x3F));
+        n = 3;
+    } else {
+        tmp[0] = (unsigned char)(0xF0 | (cp >> 18));
+        tmp[1] = (unsigned char)(0x80 | ((cp >> 12) & 0x3F));
+        tmp[2] = (unsigned char)(0x80 | ((cp >> 6) & 0x3F));
+        tmp[3] = (unsigned char)(0x80 | (cp & 0x3F));
+        n = 4;
+    }
+    return resend_buf_put(b, (const char *)tmp, n);
+}
+
+static int parse_hex4(const char **p, const char *end, unsigned int *out) {
+    if ((size_t)(end - *p) < 4)
+        return -1;
+    unsigned int cp = 0;
+    for (int i = 0; i < 4; i++) {
+        unsigned char h = (unsigned char)(*p)[i];
+        cp <<= 4;
+        if (h >= '0' && h <= '9')
+            cp |= (unsigned int)(h - '0');
+        else if (h >= 'a' && h <= 'f')
+            cp |= (unsigned int)(h - 'a' + 10);
+        else if (h >= 'A' && h <= 'F')
+            cp |= (unsigned int)(h - 'A' + 10);
+        else
+            return -1;
+    }
+    *p += 4;
+    *out = cp;
+    return 0;
+}
+
+int json_parse_string(const char *p, const char *end, char **out, const char **next) {
     if (p >= end || *p != '"')
         return -1;
     p++;
@@ -153,49 +203,40 @@ static int parse_string(const char *p, const char *end, char **out, const char *
                 c = '\t';
                 break;
             case 'u': {
-                if (p + 4 > end) {
+                unsigned int cp = 0;
+                if (parse_hex4(&p, end, &cp) != 0) {
                     resend_buf_free(&b);
                     return -1;
                 }
-                unsigned int cp = 0;
-                for (int i = 0; i < 4; i++) {
-                    unsigned char h = (unsigned char)*p++;
-                    cp <<= 4;
-                    if (h >= '0' && h <= '9')
-                        cp |= (unsigned int)(h - '0');
-                    else if (h >= 'a' && h <= 'f')
-                        cp |= (unsigned int)(h - 'a' + 10);
-                    else if (h >= 'A' && h <= 'F')
-                        cp |= (unsigned int)(h - 'A' + 10);
-                    else {
+                if (cp >= 0xD800 && cp <= 0xDBFF) {
+                    if ((size_t)(end - p) < 6 || p[0] != '\\' || p[1] != 'u') {
                         resend_buf_free(&b);
                         return -1;
                     }
+                    p += 2;
+                    unsigned int low = 0;
+                    if (parse_hex4(&p, end, &low) != 0 || low < 0xDC00 || low > 0xDFFF) {
+                        resend_buf_free(&b);
+                        return -1;
+                    }
+                    cp = 0x10000u + (((cp - 0xD800u) << 10) | (low - 0xDC00u));
+                } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                    resend_buf_free(&b);
+                    return -1;
                 }
-                if (cp < 0x80) {
-                    c = (unsigned char)cp;
-                } else if (cp < 0x800) {
-                    if (resend_buf_putc(&b, (char)(0xc0 | (cp >> 6))) != 0 ||
-                        resend_buf_putc(&b, (char)(0x80 | (cp & 0x3f))) != 0) {
-                        resend_buf_free(&b);
-                        return -1;
-                    }
-                    continue;
-                } else {
-                    if (resend_buf_putc(&b, (char)(0xe0 | (cp >> 12))) != 0 ||
-                        resend_buf_putc(&b, (char)(0x80 | ((cp >> 6) & 0x3f))) != 0 ||
-                        resend_buf_putc(&b, (char)(0x80 | (cp & 0x3f))) != 0) {
-                        resend_buf_free(&b);
-                        return -1;
-                    }
-                    continue;
+                if (put_utf8(&b, cp) != 0) {
+                    resend_buf_free(&b);
+                    return -1;
                 }
-                break;
+                continue;
             }
             default:
                 resend_buf_free(&b);
                 return -1;
             }
+        } else if (c < 0x20) {
+            resend_buf_free(&b);
+            return -1;
         }
         if (resend_buf_putc(&b, (char)c) != 0) {
             resend_buf_free(&b);
@@ -206,99 +247,330 @@ static int parse_string(const char *p, const char *end, char **out, const char *
     return -1;
 }
 
-static int skip_value(const char *p, const char *end, const char **next);
-
 static int skip_string(const char *p, const char *end, const char **next) {
     char *tmp = NULL;
-    if (parse_string(p, end, &tmp, next) != 0)
+    if (json_parse_string(p, end, &tmp, next) != 0)
         return -1;
     free(tmp);
     return 0;
 }
 
-static int skip_object_or_array(const char *p, const char *end, char open, char close,
-                                const char **next) {
-    if (p >= end || *p != open)
+static int skip_lit(const char *p, const char *end, const char *lit, const char **next) {
+    size_t n = strlen(lit);
+    if ((size_t)(end - p) < n || memcmp(p, lit, n) != 0)
         return -1;
-    p++;
-    int depth = 1;
-    while (p < end && depth) {
-        if (*p == '"') {
-            if (skip_string(p, end, &p) != 0)
-                return -1;
-            continue;
-        }
-        if (*p == open)
-            depth++;
-        else if (*p == close)
-            depth--;
-        p++;
+    if (p + n < end) {
+        unsigned char c = (unsigned char)p[n];
+        if (c == '_' || isalnum(c))
+            return -1;
     }
-    if (depth != 0)
+    *next = p + n;
+    return 0;
+}
+
+static int skip_number(const char *p, const char *end, const char **next) {
+    if (p < end && *p == '-')
+        p++;
+    if (p >= end || *p < '0' || *p > '9')
         return -1;
+    if (*p == '0') {
+        p++;
+    } else {
+        while (p < end && *p >= '0' && *p <= '9')
+            p++;
+    }
+    if (p < end && *p == '.') {
+        p++;
+        if (p >= end || *p < '0' || *p > '9')
+            return -1;
+        while (p < end && *p >= '0' && *p <= '9')
+            p++;
+    }
+    if (p < end && (*p == 'e' || *p == 'E')) {
+        p++;
+        if (p < end && (*p == '+' || *p == '-'))
+            p++;
+        if (p >= end || *p < '0' || *p > '9')
+            return -1;
+        while (p < end && *p >= '0' && *p <= '9')
+            p++;
+    }
     *next = p;
     return 0;
 }
 
-static int skip_value(const char *p, const char *end, const char **next) {
-    p = skip_ws(p, end);
-    if (p >= end)
-        return -1;
-    if (*p == '"')
-        return skip_string(p, end, next);
-    if (*p == '{')
-        return skip_object_or_array(p, end, '{', '}', next);
-    if (*p == '[')
-        return skip_object_or_array(p, end, '[', ']', next);
-    if (*p == 't' || *p == 'f' || *p == 'n' || *p == '-' || (*p >= '0' && *p <= '9')) {
-        while (p < end && !isspace((unsigned char)*p) && *p != ',' && *p != '}' && *p != ']')
-            p++;
-        *next = p;
-        return 0;
-    }
-    return -1;
-}
+static int skip_value(const char *p, const char *end, const char **next, int depth);
+static int walk_object(const char *p, const char *end, const char *key, const char **val,
+                       const char **val_end, const char **next, int depth);
 
-int json_get_string(const char *json, size_t len, const char *key, char **out) {
-    *out = NULL;
-    if (!json || !key)
-        return -1;
-    const char *p = json;
-    const char *end = json + len;
-    p = skip_ws(p, end);
-    if (p >= end || *p != '{')
+static int skip_array(const char *p, const char *end, const char **next, int depth) {
+    if (depth >= JSON_MAX_DEPTH || p >= end || *p != '[')
         return -1;
     p++;
+    p = json_skip_ws(p, end);
+    if (p < end && *p == ']') {
+        *next = p + 1;
+        return 0;
+    }
     for (;;) {
-        p = skip_ws(p, end);
-        if (p < end && *p == '}')
+        const char *start = p;
+        if (skip_value(p, end, &p, depth + 1) != 0 || p == start)
             return -1;
+        p = json_skip_ws(p, end);
+        if (p < end && *p == ',') {
+            p = json_skip_ws(p + 1, end);
+            if (p >= end || *p == ']')
+                return -1;
+            continue;
+        }
+        if (p < end && *p == ']') {
+            *next = p + 1;
+            return 0;
+        }
+        return -1;
+    }
+}
+
+/* 0 valid (and key found, when key is set), 1 key absent, -1 malformed. */
+static int walk_object(const char *p, const char *end, const char *key, const char **val,
+                       const char **val_end, const char **next, int depth) {
+    if (depth >= JSON_MAX_DEPTH || p >= end || *p != '{')
+        return -1;
+    p++;
+    int found = 0;
+    const char *found_val = NULL;
+    const char *found_end = NULL;
+    p = json_skip_ws(p, end);
+    if (p < end && *p == '}') {
+        *next = p + 1;
+        return key ? 1 : 0;
+    }
+    for (;;) {
         char *k = NULL;
-        if (parse_string(p, end, &k, &p) != 0)
+        if (json_parse_string(p, end, &k, &p) != 0)
             return -1;
-        p = skip_ws(p, end);
+        p = json_skip_ws(p, end);
         if (p >= end || *p != ':') {
             free(k);
             return -1;
         }
         p++;
-        p = skip_ws(p, end);
-        int want = strcmp(k, key) == 0;
+        p = json_skip_ws(p, end);
+        int want = key && strcmp(k, key) == 0;
         free(k);
-        if (want) {
-            if (p >= end || *p != '"')
-                return -1;
-            return parse_string(p, end, out, &p);
-        }
-        if (skip_value(p, end, &p) != 0)
+        const char *start = p;
+        if (skip_value(p, end, &p, depth + 1) != 0 || p == start)
             return -1;
-        p = skip_ws(p, end);
+        if (want && !found) {
+            found = 1;
+            found_val = start;
+            found_end = p;
+        }
+        p = json_skip_ws(p, end);
         if (p < end && *p == ',') {
-            p++;
+            p = json_skip_ws(p + 1, end);
+            if (p >= end || *p == '}')
+                return -1;
             continue;
         }
-        if (p < end && *p == '}')
-            return -1;
+        if (p < end && *p == '}') {
+            *next = p + 1;
+            if (!key)
+                return 0;
+            if (!found)
+                return 1;
+            *val = found_val;
+            *val_end = found_end;
+            return 0;
+        }
         return -1;
     }
+}
+
+static int skip_value(const char *p, const char *end, const char **next, int depth) {
+    if (depth >= JSON_MAX_DEPTH)
+        return -1;
+    p = json_skip_ws(p, end);
+    if (p >= end)
+        return -1;
+    if (*p == '"')
+        return skip_string(p, end, next);
+    if (*p == '{')
+        return walk_object(p, end, NULL, NULL, NULL, next, depth) == 0 ? 0 : -1;
+    if (*p == '[')
+        return skip_array(p, end, next, depth);
+    if (*p == 't')
+        return skip_lit(p, end, "true", next);
+    if (*p == 'f')
+        return skip_lit(p, end, "false", next);
+    if (*p == 'n')
+        return skip_lit(p, end, "null", next);
+    if (*p == '-' || (*p >= '0' && *p <= '9'))
+        return skip_number(p, end, next);
+    return -1;
+}
+
+int json_skip_value(const char *p, const char *end, const char **next) {
+    return skip_value(p, end, next, 0);
+}
+
+int json_array_step(const char **p, const char *end) {
+    const char *q = json_skip_ws(*p, end);
+    if (q < end && *q == ',') {
+        q = json_skip_ws(q + 1, end);
+        if (q >= end || *q == ']')
+            return -1;
+        *p = q;
+        return 1;
+    }
+    if (q < end && *q == ']') {
+        *p = q;
+        return 0;
+    }
+    return -1;
+}
+
+/* 0 found, 1 absent, -1 malformed. The slice must be a single object. */
+static int member_at(const char *json, size_t len, const char *key, const char **val,
+                     const char **val_end) {
+    if (!json || !key || !val || !val_end)
+        return -1;
+    const char *end = json + len;
+    const char *p = json_skip_ws(json, end);
+    const char *next = NULL;
+    int st = walk_object(p, end, key, val, val_end, &next, 0);
+    if (st < 0 || !next)
+        return -1;
+    if (json_skip_ws(next, end) != end)
+        return -1;
+    return st;
+}
+
+static int token_is(const char *p, const char *end, const char *lit) {
+    if (!p || !end || p > end || !lit)
+        return 0;
+    size_t n = strlen(lit);
+    if ((size_t)(end - p) < n || memcmp(p, lit, n) != 0)
+        return 0;
+    return json_skip_ws(p + n, end) == end;
+}
+
+int json_is_null(const char *p, const char *end) { return token_is(p, end, "null"); }
+
+int json_member(const char *json, size_t len, const char *key, const char **val,
+                const char **val_end) {
+    return member_at(json, len, key, val, val_end);
+}
+
+int json_get_string(const char *json, size_t len, const char *key, char **out) {
+    *out = NULL;
+    const char *val = NULL;
+    const char *val_end = NULL;
+    if (member_at(json, len, key, &val, &val_end) != 0)
+        return -1;
+    if (val >= val_end || *val != '"')
+        return -1;
+    const char *next = NULL;
+    return json_parse_string(val, val_end, out, &next);
+}
+
+int json_opt_string(const char *json, size_t len, const char *key, char **out) {
+    *out = NULL;
+    const char *val = NULL;
+    const char *val_end = NULL;
+    int st = member_at(json, len, key, &val, &val_end);
+    if (st < 0)
+        return -1;
+    if (st > 0)
+        return 0;
+    val = json_skip_ws(val, val_end);
+    if (json_is_null(val, val_end))
+        return 0;
+    if (val >= val_end || *val != '"')
+        return -1;
+    const char *next = NULL;
+    return json_parse_string(val, val_end, out, &next);
+}
+
+static void free_string_array(char **items, size_t count) {
+    if (!items)
+        return;
+    for (size_t i = 0; i < count; i++)
+        free(items[i]);
+    free(items);
+}
+
+int json_opt_string_array(const char *json, size_t len, const char *key, char ***out,
+                          size_t *count) {
+    *out = NULL;
+    *count = 0;
+    const char *val = NULL;
+    const char *val_end = NULL;
+    int st = member_at(json, len, key, &val, &val_end);
+    if (st < 0)
+        return -1;
+    if (st > 0)
+        return 0;
+    val = json_skip_ws(val, val_end);
+    if (json_is_null(val, val_end))
+        return 0;
+    if (val >= val_end || *val != '[')
+        return -1;
+    const char *p = val + 1;
+    char **items = NULL;
+    size_t n = 0;
+    size_t cap = 0;
+    for (;;) {
+        p = json_skip_ws(p, val_end);
+        if (p < val_end && *p == ']')
+            break;
+        if (p >= val_end || *p != '"')
+            goto fail;
+        char *s = NULL;
+        if (json_parse_string(p, val_end, &s, &p) != 0)
+            goto fail;
+        if (n == cap) {
+            size_t ncap = cap ? cap * 2 : 4;
+            char **ni = realloc(items, ncap * sizeof *ni);
+            if (!ni) {
+                free(s);
+                goto fail;
+            }
+            items = ni;
+            cap = ncap;
+        }
+        items[n++] = s;
+        int step = json_array_step(&p, val_end);
+        if (step < 0)
+            goto fail;
+        if (step == 0)
+            break;
+    }
+    *out = items;
+    *count = n;
+    return 0;
+fail:
+    free_string_array(items, n);
+    return -1;
+}
+
+int json_opt_bool(const char *json, size_t len, const char *key, int *out) {
+    *out = 0;
+    const char *val = NULL;
+    const char *val_end = NULL;
+    int st = member_at(json, len, key, &val, &val_end);
+    if (st < 0)
+        return -1;
+    if (st > 0)
+        return 0;
+    val = json_skip_ws(val, val_end);
+    if (json_is_null(val, val_end))
+        return 0;
+    if (token_is(val, val_end, "true")) {
+        *out = 1;
+        return 0;
+    }
+    if (token_is(val, val_end, "false"))
+        return 0;
+    return -1;
 }

@@ -54,6 +54,24 @@ int json_tag_array(resend_buf *b, const resend_pair *tags, size_t count);
 /* First top-level string field named key. *out is malloc'd. */
 int json_get_string(const char *json, size_t len, const char *key, char **out);
 
+/* Reader primitives. A slice is one JSON value; unknown object fields are skipped.
+ * Malformed JSON is -1. Nesting deeper than 64 is malformed. */
+const char *json_skip_ws(const char *p, const char *end);
+int json_parse_string(const char *p, const char *end, char **out, const char **next);
+int json_skip_value(const char *p, const char *end, const char **next);
+/* After an array element: 1 if another follows (*p at that value), 0 at ']', -1 if malformed. */
+int json_array_step(const char **p, const char *end);
+/* True for a null token, with optional trailing whitespace. */
+int json_is_null(const char *p, const char *end);
+/* Missing or JSON null -> *out NULL and 0. Wrong type or malformed -> -1. */
+int json_opt_string(const char *json, size_t len, const char *key, char **out);
+/* Missing or null -> empty array (*out NULL, *count 0). Wrong type or malformed -> -1. */
+int json_opt_string_array(const char *json, size_t len, const char *key, char ***out, size_t *count);
+/* Missing or null -> *out 0. Wrong type or malformed -> -1. */
+int json_opt_bool(const char *json, size_t len, const char *key, int *out);
+/* 0 found, 1 absent, -1 malformed. *val..*val_end is the raw value span. */
+int json_member(const char *json, size_t len, const char *key, const char **val, const char **val_end);
+
 typedef struct {
     long status; /* 0 when no HTTP response */
     resend_buf body;
@@ -68,5 +86,19 @@ void resend_http_response_free(resend_http_response *r);
  */
 int resend_http_json(resend *client, const char *method, const char *path, const char *body,
                      const char *idempotency_key, resend_http_response *out);
+
+/*
+ * Build path with optional page query. Rejects after+before together (error slot,
+ * no request). limit 0 omits the parameter. Query values are percent-encoded.
+ * *out is malloc'd.
+ */
+int resend_path_with_page(resend *client, const char *prefix, const resend_page *page, char **out);
+
+/*
+ * prefix + one percent-encoded path segment + optional suffix (NULL omits it).
+ * *out is malloc'd. Failure sets the error slot.
+ */
+int resend_path_with_id(resend *client, const char *prefix, const char *id, const char *suffix,
+                        char **out);
 
 #endif /* LIBRESEND_INTERNAL_H */
