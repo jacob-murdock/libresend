@@ -230,8 +230,9 @@ int resend_receiving_attachment_get(resend *client, const char *email_id, const 
 
 /*
  * Download raw.download_url, or an attachment download_url.
- * HTTPS only. Refuses a redirect onto a loopback, private, link-local,
- * or metadata address. *out_bytes is malloc'd; the caller frees it.
+ * HTTPS only, redirects included. Honors proxy environment variables.
+ * Fails past 64 MiB.
+ * *out_bytes is malloc'd; the caller frees it.
  */
 int resend_download(resend *client, const char *https_url, void **out_bytes, size_t *out_len);
 

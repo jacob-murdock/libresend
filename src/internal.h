@@ -69,6 +69,16 @@ int json_opt_string(const char *json, size_t len, const char *key, char **out);
 int json_opt_string_array(const char *json, size_t len, const char *key, char ***out, size_t *count);
 /* Missing or null -> *out 0. Wrong type or malformed -> -1. */
 int json_opt_bool(const char *json, size_t len, const char *key, int *out);
+/* Missing or null -> *out 0. Non-integer, out of int64 range, or malformed -> -1. */
+int json_opt_i64(const char *json, size_t len, const char *key, int64_t *out);
+/*
+ * Call fn for each member of one object, in order. key is valid only for that
+ * call. A non-zero return from fn stops the walk and is returned as-is.
+ * The slice is one object; trailing non-space is malformed.
+ */
+int json_each_member(const char *json, size_t len,
+                     int (*fn)(const char *key, const char *val, const char *val_end, void *ctx),
+                     void *ctx);
 /* 0 found, 1 absent, -1 malformed. *val..*val_end is the raw value span. */
 int json_member(const char *json, size_t len, const char *key, const char **val, const char **val_end);
 

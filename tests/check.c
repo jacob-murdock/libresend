@@ -1654,6 +1654,785 @@ static void test_webhook_verify(void) {
     CHECK(strcmp(err.message, "invalid timestamp") == 0);
 }
 
+/*
+ * GET /emails/receiving/{id}. html_format is data_uri, cid, or omitted.
+ * Fills html, text, html_format, headers, received_for, authentication, and raw.
+ * Attachment metadata on the email leaves download_url and expires_at NULL.
+ */
+static void test_receiving_get(void) {
+    static const char id[] = "4ef9a417-02e9-4d39-ad75-9611e0fcc33c";
+    static const char full[] =
+        "{\"object\":\"email\","
+        "\"id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\","
+        "\"to\":[\"delivered@resend.dev\"],"
+        "\"from\":\"onboarding@resend.dev\","
+        "\"created_at\":\"2026-04-03T22:13:42.674Z\","
+        "\"subject\":\"Hello World\","
+        "\"html\":\"Congrats on sending your <strong>first email</strong>!\","
+        "\"html_format\":\"cid\","
+        "\"text\":\"Congrats on sending your first email!\","
+        "\"headers\":{"
+        "\"from\":\"Acme <onboarding@resend.dev>\","
+        "\"return-path\":\"lucas.costa@resend.com\","
+        "\"mime-version\":\"1.0\""
+        "},"
+        "\"bcc\":[],"
+        "\"cc\":[\"cc@example.com\"],"
+        "\"reply_to\":[\"reply@example.com\"],"
+        "\"received_for\":[\"forwarded@example.com\",\"also@example.com\"],"
+        "\"authentication\":{\"spf\":\"pass\",\"dkim\":\"gray\",\"dmarc\":\"fail\",\"arc\":\"ignored\"},"
+        "\"message_id\":\"<111-222-333@email.example.com>\","
+        "\"raw\":{"
+        "\"download_url\":\"https://example.resend.com/receiving/raw/054da427\","
+        "\"expires_at\":\"2026-04-03T23:13:42.674Z\""
+        "},"
+        "\"attachments\":["
+        "{\"id\":\"2a0c9ce0-3112-4728-976e-47ddcd16a318\","
+        "\"filename\":\"avatar.png\",\"content_type\":\"image/png\","
+        "\"content_disposition\":\"inline\",\"content_id\":\"img001\",\"size\":4096,"
+        "\"download_url\":\"https://inbound-cdn.resend.com/should-not-copy\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"},"
+        "{\"id\":\"3b1d0df1-4223-5839-087f-54eedd27b419\","
+        "\"filename\":null,\"content_type\":\"application/pdf\","
+        "\"content_disposition\":null,\"content_id\":null,\"size\":13264}"
+        "],"
+        "\"preview\":\"ignored\"}";
+
+    fake_exchange exchange = {.status = 200, .body = full};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_received email = {0};
+    int rc = resend_receiving_get(client, id, "raw", &email);
+    CHECK(rc == -1);
+    CHECK(email.id == NULL);
+    CHECK(fake_request_count(f) == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && err->message[0] != '\0');
+
+    memset(&email, 0, sizeof email);
+    rc = resend_receiving_get(client, id, "", &email);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+
+    rc = resend_receiving_get(client, id, "cid", &email);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f),
+                 "/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c?html_format=cid") == 0);
+    CHECK(header_eq(f, "Authorization", "Bearer re_test"));
+    CHECK(email.id != NULL && strcmp(email.id, id) == 0);
+    CHECK(email.from != NULL && strcmp(email.from, "onboarding@resend.dev") == 0);
+    CHECK(email.to_count == 1);
+    CHECK(email.to != NULL && strcmp(email.to[0], "delivered@resend.dev") == 0);
+    CHECK(email.cc_count == 1);
+    CHECK(email.cc != NULL && strcmp(email.cc[0], "cc@example.com") == 0);
+    CHECK(email.bcc_count == 0);
+    CHECK(email.reply_to_count == 1);
+    CHECK(email.reply_to != NULL && strcmp(email.reply_to[0], "reply@example.com") == 0);
+    CHECK(email.subject != NULL && strcmp(email.subject, "Hello World") == 0);
+    CHECK(email.message_id != NULL &&
+          strcmp(email.message_id, "<111-222-333@email.example.com>") == 0);
+    CHECK(email.html != NULL &&
+          strcmp(email.html, "Congrats on sending your <strong>first email</strong>!") == 0);
+    CHECK(email.html_format != NULL && strcmp(email.html_format, "cid") == 0);
+    CHECK(email.text != NULL && strcmp(email.text, "Congrats on sending your first email!") == 0);
+    CHECK(email.header_count == 3);
+    CHECK(email.headers != NULL);
+    CHECK(email.headers[0].name != NULL && strcmp(email.headers[0].name, "from") == 0);
+    CHECK(email.headers[0].value != NULL &&
+          strcmp(email.headers[0].value, "Acme <onboarding@resend.dev>") == 0);
+    CHECK(email.headers[1].name != NULL && strcmp(email.headers[1].name, "return-path") == 0);
+    CHECK(email.headers[1].value != NULL &&
+          strcmp(email.headers[1].value, "lucas.costa@resend.com") == 0);
+    CHECK(email.headers[2].name != NULL && strcmp(email.headers[2].name, "mime-version") == 0);
+    CHECK(email.headers[2].value != NULL && strcmp(email.headers[2].value, "1.0") == 0);
+    CHECK(email.received_for_count == 2);
+    CHECK(email.received_for != NULL &&
+          strcmp(email.received_for[0], "forwarded@example.com") == 0);
+    CHECK(strcmp(email.received_for[1], "also@example.com") == 0);
+    CHECK(email.authentication.spf != NULL && strcmp(email.authentication.spf, "pass") == 0);
+    CHECK(email.authentication.dkim != NULL && strcmp(email.authentication.dkim, "gray") == 0);
+    CHECK(email.authentication.dmarc != NULL && strcmp(email.authentication.dmarc, "fail") == 0);
+    CHECK(email.raw.download_url != NULL &&
+          strcmp(email.raw.download_url, "https://example.resend.com/receiving/raw/054da427") == 0);
+    CHECK(email.raw.expires_at != NULL &&
+          strcmp(email.raw.expires_at, "2026-04-03T23:13:42.674Z") == 0);
+    CHECK(email.created_at != NULL && strcmp(email.created_at, "2026-04-03T22:13:42.674Z") == 0);
+    CHECK(email.attachment_count == 2);
+    CHECK(email.attachments != NULL);
+    CHECK(email.attachments[0].id != NULL &&
+          strcmp(email.attachments[0].id, "2a0c9ce0-3112-4728-976e-47ddcd16a318") == 0);
+    CHECK(email.attachments[0].filename != NULL &&
+          strcmp(email.attachments[0].filename, "avatar.png") == 0);
+    CHECK(email.attachments[0].content_type != NULL &&
+          strcmp(email.attachments[0].content_type, "image/png") == 0);
+    CHECK(email.attachments[0].content_disposition != NULL &&
+          strcmp(email.attachments[0].content_disposition, "inline") == 0);
+    CHECK(email.attachments[0].content_id != NULL &&
+          strcmp(email.attachments[0].content_id, "img001") == 0);
+    CHECK(email.attachments[0].size == 4096);
+    CHECK(email.attachments[0].download_url == NULL);
+    CHECK(email.attachments[0].expires_at == NULL);
+    CHECK(email.attachments[1].id != NULL &&
+          strcmp(email.attachments[1].id, "3b1d0df1-4223-5839-087f-54eedd27b419") == 0);
+    CHECK(email.attachments[1].filename == NULL);
+    CHECK(email.attachments[1].content_disposition == NULL);
+    CHECK(email.attachments[1].content_id == NULL);
+    CHECK(email.attachments[1].size == 13264);
+    CHECK(email.attachments[1].download_url == NULL);
+    CHECK(email.attachments[1].expires_at == NULL);
+
+    resend_received_free(&email);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char omitted_body[] =
+        "{\"id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\","
+        "\"html\":\"<p>Hi</p>\",\"html_format\":\"data_uri\",\"text\":null,"
+        "\"headers\":{\"subject\":\"Hello World\"},"
+        "\"received_for\":[\"forwarded@example.com\"],"
+        "\"authentication\":null,\"raw\":null,"
+        "\"attachments\":[{\"id\":\"2a0c9ce0-3112-4728-976e-47ddcd16a318\","
+        "\"filename\":\"avatar.png\",\"content_type\":\"image/png\","
+        "\"content_disposition\":\"inline\",\"content_id\":\"img001\",\"size\":4096,"
+        "\"download_url\":\"https://inbound-cdn.resend.com/should-not-copy\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"}]}";
+    fake_exchange omitted = {.status = 200, .body = omitted_body};
+    f = fake_start(&omitted, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    memset(&email, 0, sizeof email);
+    rc = resend_receiving_get(client, id, NULL, &email);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c") == 0);
+    CHECK(email.html != NULL && strcmp(email.html, "<p>Hi</p>") == 0);
+    CHECK(email.html_format != NULL && strcmp(email.html_format, "data_uri") == 0);
+    CHECK(email.text == NULL);
+    CHECK(email.header_count == 1);
+    CHECK(email.headers != NULL && email.headers[0].name != NULL &&
+          strcmp(email.headers[0].name, "subject") == 0);
+    CHECK(email.headers[0].value != NULL && strcmp(email.headers[0].value, "Hello World") == 0);
+    CHECK(email.received_for_count == 1);
+    CHECK(email.received_for != NULL &&
+          strcmp(email.received_for[0], "forwarded@example.com") == 0);
+    CHECK(email.authentication.spf == NULL);
+    CHECK(email.authentication.dkim == NULL);
+    CHECK(email.authentication.dmarc == NULL);
+    CHECK(email.raw.download_url == NULL);
+    CHECK(email.raw.expires_at == NULL);
+    CHECK(email.attachment_count == 1);
+    CHECK(email.attachments != NULL);
+    CHECK(email.attachments[0].download_url == NULL);
+    CHECK(email.attachments[0].expires_at == NULL);
+    CHECK(email.attachments[0].size == 4096);
+    resend_received_free(&email);
+    resend_free(client);
+    fake_stop(f);
+
+    /* Body html_format can be cid when data_uri was requested. */
+    static const char cid_anyway[] =
+        "{\"id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\","
+        "\"html\":\"cid:img001\",\"html_format\":\"cid\",\"text\":\"plain\"}";
+    fake_exchange anyway = {.status = 200, .body = cid_anyway};
+    f = fake_start(&anyway, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_receiving_get(client, id, "data_uri", &email);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f),
+                 "/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c?html_format=data_uri") ==
+              0);
+    CHECK(email.html_format != NULL && strcmp(email.html_format, "cid") == 0);
+    CHECK(email.html != NULL && strcmp(email.html, "cid:img001") == 0);
+    CHECK(email.text != NULL && strcmp(email.text, "plain") == 0);
+    CHECK(email.header_count == 0);
+    CHECK(email.headers == NULL);
+    CHECK(email.attachment_count == 0);
+    CHECK(email.attachments == NULL);
+    CHECK(email.raw.download_url == NULL);
+    resend_received_free(&email);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "{\"html\":\"no id\"}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"headers\":{\"from\":1}}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"attachments\":[{\"id\":\"a\",\"size\":\"4\"}]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"authentication\":[]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"raw\":{\"download_url\":true}}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"received_for\":\"forwarded@example.com\"}"},
+        {.status = 404, .body = "{\"name\":\"not_found\",\"message\":\"Email not found\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 7; i++) {
+        resend_received bad_email = {0};
+        rc = resend_receiving_get(client, id, NULL, &bad_email);
+        CHECK(rc == -1);
+        CHECK(bad_email.id == NULL);
+        CHECK(bad_email.html == NULL);
+        CHECK(bad_email.headers == NULL);
+        CHECK(bad_email.attachments == NULL);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        CHECK(err->message != NULL && err->message[0] != '\0');
+        resend_received_free(&bad_email);
+    }
+    memset(&email, 0, sizeof email);
+    rc = resend_receiving_get(client, id, NULL, &email);
+    CHECK(rc == -1);
+    CHECK(email.id == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "Email not found") == 0);
+    resend_received_free(&email);
+    CHECK(fake_request_count(f) == 8);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/*
+ * GET /emails/receiving. Envelope plus attachment metadata. has_more.
+ * No html, text, headers, or raw (even when those keys appear in the body).
+ */
+static void test_receiving_list(void) {
+    static const char body[] =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\","
+        "\"to\":[\"delivered@resend.dev\"],"
+        "\"from\":\"onboarding@resend.dev\","
+        "\"created_at\":\"2026-04-03T22:13:42.674Z\","
+        "\"subject\":\"Hello World\","
+        "\"bcc\":[],\"cc\":[\"cc@example.com\"],\"reply_to\":[\"reply@example.com\"],"
+        "\"message_id\":\"<111-222-333@email.example.com>\","
+        "\"html\":\"should-not-copy\","
+        "\"html_format\":\"cid\","
+        "\"text\":\"should-not-copy\","
+        "\"headers\":{\"from\":\"Acme <onboarding@resend.dev>\"},"
+        "\"received_for\":[\"forwarded@example.com\"],"
+        "\"authentication\":{\"spf\":\"pass\",\"dkim\":\"pass\",\"dmarc\":\"pass\"},"
+        "\"raw\":{\"download_url\":\"https://example.resend.com/raw\",\"expires_at\":\"2026-04-03T23:13:42.674Z\"},"
+        "\"attachments\":["
+        "{\"id\":\"2a0c9ce0-3112-4728-976e-47ddcd16a318\","
+        "\"filename\":\"avatar.png\",\"content_type\":\"image/png\","
+        "\"content_disposition\":\"inline\",\"content_id\":\"img001\",\"size\":4096,"
+        "\"download_url\":\"https://inbound-cdn.resend.com/should-not-copy\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"}"
+        "]},"
+        "{\"id\":\"3a9f8c2b-1e5d-4f8a-9c7b-2d6e5f8a9c7b\","
+        "\"to\":[\"user@example.com\"],"
+        "\"from\":\"hello@example.com\","
+        "\"created_at\":\"2026-04-03T21:45:12.345Z\","
+        "\"subject\":\"Welcome\","
+        "\"bcc\":null,\"cc\":null,\"reply_to\":null,"
+        "\"message_id\":\"<444-555-666@email.example.com>\","
+        "\"attachments\":[]}"
+        "]}";
+
+    fake_exchange exchange = {.status = 200, .body = body};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_page both = {.after = "a", .before = "b", .limit = 10};
+    resend_received_list list = {0};
+    int rc = resend_receiving_list(client, &both, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && err->message[0] != '\0');
+
+    resend_page page = {.after = "cursor-1", .limit = 0};
+    rc = resend_receiving_list(client, &page, &list);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/emails/receiving?after=cursor-1") == 0);
+    CHECK(header_eq(f, "Authorization", "Bearer re_test"));
+    CHECK(list.has_more == 1);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+
+    CHECK(list.items[0].id != NULL &&
+          strcmp(list.items[0].id, "4ef9a417-02e9-4d39-ad75-9611e0fcc33c") == 0);
+    CHECK(list.items[0].from != NULL && strcmp(list.items[0].from, "onboarding@resend.dev") == 0);
+    CHECK(list.items[0].to_count == 1);
+    CHECK(list.items[0].to != NULL && strcmp(list.items[0].to[0], "delivered@resend.dev") == 0);
+    CHECK(list.items[0].cc_count == 1);
+    CHECK(list.items[0].cc != NULL && strcmp(list.items[0].cc[0], "cc@example.com") == 0);
+    CHECK(list.items[0].bcc_count == 0);
+    CHECK(list.items[0].reply_to_count == 1);
+    CHECK(list.items[0].reply_to != NULL &&
+          strcmp(list.items[0].reply_to[0], "reply@example.com") == 0);
+    CHECK(list.items[0].subject != NULL && strcmp(list.items[0].subject, "Hello World") == 0);
+    CHECK(list.items[0].message_id != NULL &&
+          strcmp(list.items[0].message_id, "<111-222-333@email.example.com>") == 0);
+    CHECK(list.items[0].created_at != NULL &&
+          strcmp(list.items[0].created_at, "2026-04-03T22:13:42.674Z") == 0);
+    CHECK(list.items[0].html == NULL);
+    CHECK(list.items[0].html_format == NULL);
+    CHECK(list.items[0].text == NULL);
+    CHECK(list.items[0].headers == NULL);
+    CHECK(list.items[0].header_count == 0);
+    CHECK(list.items[0].received_for == NULL);
+    CHECK(list.items[0].received_for_count == 0);
+    CHECK(list.items[0].authentication.spf == NULL);
+    CHECK(list.items[0].authentication.dkim == NULL);
+    CHECK(list.items[0].authentication.dmarc == NULL);
+    CHECK(list.items[0].raw.download_url == NULL);
+    CHECK(list.items[0].raw.expires_at == NULL);
+    CHECK(list.items[0].attachment_count == 1);
+    CHECK(list.items[0].attachments != NULL);
+    CHECK(list.items[0].attachments[0].id != NULL &&
+          strcmp(list.items[0].attachments[0].id, "2a0c9ce0-3112-4728-976e-47ddcd16a318") == 0);
+    CHECK(list.items[0].attachments[0].filename != NULL &&
+          strcmp(list.items[0].attachments[0].filename, "avatar.png") == 0);
+    CHECK(list.items[0].attachments[0].content_type != NULL &&
+          strcmp(list.items[0].attachments[0].content_type, "image/png") == 0);
+    CHECK(list.items[0].attachments[0].content_disposition != NULL &&
+          strcmp(list.items[0].attachments[0].content_disposition, "inline") == 0);
+    CHECK(list.items[0].attachments[0].content_id != NULL &&
+          strcmp(list.items[0].attachments[0].content_id, "img001") == 0);
+    CHECK(list.items[0].attachments[0].size == 4096);
+    CHECK(list.items[0].attachments[0].download_url == NULL);
+    CHECK(list.items[0].attachments[0].expires_at == NULL);
+
+    CHECK(list.items[1].id != NULL &&
+          strcmp(list.items[1].id, "3a9f8c2b-1e5d-4f8a-9c7b-2d6e5f8a9c7b") == 0);
+    CHECK(list.items[1].from != NULL && strcmp(list.items[1].from, "hello@example.com") == 0);
+    CHECK(list.items[1].to_count == 1);
+    CHECK(list.items[1].subject != NULL && strcmp(list.items[1].subject, "Welcome") == 0);
+    CHECK(list.items[1].message_id != NULL &&
+          strcmp(list.items[1].message_id, "<444-555-666@email.example.com>") == 0);
+    CHECK(list.items[1].bcc_count == 0);
+    CHECK(list.items[1].cc_count == 0);
+    CHECK(list.items[1].reply_to_count == 0);
+    CHECK(list.items[1].html == NULL);
+    CHECK(list.items[1].text == NULL);
+    CHECK(list.items[1].headers == NULL);
+    CHECK(list.items[1].raw.download_url == NULL);
+    CHECK(list.items[1].attachment_count == 0);
+    CHECK(list.items[1].attachments == NULL);
+
+    resend_received_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_page limited = {.before = "cursor-2", .limit = 5};
+    memset(&list, 0, sizeof list);
+    rc = resend_receiving_list(client, &limited, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/emails/receiving?before=cursor-2&limit=5") == 0);
+    resend_received_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char empty_body[] = "{\"has_more\":false,\"data\":[]}";
+    fake_exchange empty_ex = {.status = 200, .body = empty_body};
+    f = fake_start(&empty_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_receiving_list(client, NULL, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/emails/receiving") == 0);
+    CHECK(list.count == 0);
+    CHECK(list.items == NULL);
+    CHECK(list.has_more == 0);
+    resend_received_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "{\"has_more\":truefoo,\"data\":[]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"subject\":\"only\"}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"id\":\"x\"},]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[1]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"id\":\"x\",\"attachments\":[{\"size\":1}]}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":null}"},
+        {.status = 200, .body = "{\"has_more\":true}"},
+        {.status = 401, .body = "{\"name\":\"restricted_api_key\",\"message\":\"This API key is restricted\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 6; i++) {
+        resend_received_list bad_list = {0};
+        rc = resend_receiving_list(client, NULL, &bad_list);
+        CHECK(rc == -1);
+        CHECK(bad_list.items == NULL);
+        CHECK(bad_list.count == 0);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        CHECK(err->message != NULL && err->message[0] != '\0');
+        resend_received_list_free(&bad_list);
+    }
+
+    resend_received_list empty = {0};
+    CHECK(resend_receiving_list(client, NULL, &empty) == 0);
+    CHECK(empty.count == 0);
+    CHECK(empty.items == NULL);
+    CHECK(empty.has_more == 0);
+    resend_received_list_free(&empty);
+
+    CHECK(resend_receiving_list(client, NULL, &empty) == 0);
+    CHECK(empty.count == 0);
+    CHECK(empty.has_more == 1);
+    resend_received_list_free(&empty);
+
+    memset(&list, 0, sizeof list);
+    rc = resend_receiving_list(client, NULL, &list);
+    CHECK(rc == -1);
+    CHECK(list.items == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 401);
+    CHECK(err->name != NULL && strcmp(err->name, "restricted_api_key") == 0);
+    resend_received_list_free(&list);
+    CHECK(fake_request_count(f) == 9);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/*
+ * Attachment list/get set download_url and expires_at. List takes resend_page
+ * and returns has_more. Path is under /emails/receiving/{id}/attachments.
+ */
+static void test_receiving_attachments(void) {
+    static const char email_id[] = "4ef9a417-02e9-4d39-ad75-9611e0fcc33c";
+    static const char att_id[] = "2a0c9ce0-3112-4728-976e-47ddcd16a318";
+    static const char list_body[] =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"2a0c9ce0-3112-4728-976e-47ddcd16a318\","
+        "\"filename\":\"avatar.png\",\"content_type\":\"image/png\","
+        "\"content_disposition\":\"inline\",\"content_id\":\"img001\",\"size\":4096,"
+        "\"download_url\":\"https://inbound-cdn.resend.com/avatar.png?sig=1\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"},"
+        "{\"id\":\"3b1d0df1-4223-5839-087f-54eedd27b419\","
+        "\"filename\":null,\"content_type\":\"application/pdf\","
+        "\"content_disposition\":null,\"content_id\":null,\"size\":13264,"
+        "\"download_url\":\"https://inbound-cdn.resend.com/doc.pdf?sig=2\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"}"
+        "]}";
+    static const char get_body[] =
+        "{\"object\":\"attachment\","
+        "\"id\":\"2a0c9ce0-3112-4728-976e-47ddcd16a318\","
+        "\"filename\":\"avatar.png\",\"content_type\":\"image/png\","
+        "\"content_disposition\":\"inline\",\"content_id\":\"img001\",\"size\":4096,"
+        "\"download_url\":\"https://inbound-cdn.resend.com/avatar.png?sig=1\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"}";
+
+    fake_exchange list_ex = {.status = 200, .body = list_body};
+    fake *f = fake_start(&list_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_page both = {.after = "a", .before = "b"};
+    resend_received_attachment_list list = {0};
+    int rc = resend_receiving_attachments_list(client, email_id, &both, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+
+    rc = resend_receiving_attachments_list(client, "", NULL, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_page page = {.after = "cursor-1", .limit = 0};
+    rc = resend_receiving_attachments_list(client, email_id, &page, &list);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f),
+                 "/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/attachments"
+                 "?after=cursor-1") == 0);
+    CHECK(header_eq(f, "Authorization", "Bearer re_test"));
+    CHECK(list.has_more == 1);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL && strcmp(list.items[0].id, att_id) == 0);
+    CHECK(list.items[0].filename != NULL && strcmp(list.items[0].filename, "avatar.png") == 0);
+    CHECK(list.items[0].content_type != NULL &&
+          strcmp(list.items[0].content_type, "image/png") == 0);
+    CHECK(list.items[0].content_disposition != NULL &&
+          strcmp(list.items[0].content_disposition, "inline") == 0);
+    CHECK(list.items[0].content_id != NULL && strcmp(list.items[0].content_id, "img001") == 0);
+    CHECK(list.items[0].size == 4096);
+    CHECK(list.items[0].download_url != NULL &&
+          strcmp(list.items[0].download_url, "https://inbound-cdn.resend.com/avatar.png?sig=1") ==
+              0);
+    CHECK(list.items[0].expires_at != NULL &&
+          strcmp(list.items[0].expires_at, "2026-10-17T14:29:41.521Z") == 0);
+    CHECK(list.items[1].id != NULL &&
+          strcmp(list.items[1].id, "3b1d0df1-4223-5839-087f-54eedd27b419") == 0);
+    CHECK(list.items[1].filename == NULL);
+    CHECK(list.items[1].content_disposition == NULL);
+    CHECK(list.items[1].content_id == NULL);
+    CHECK(list.items[1].size == 13264);
+    CHECK(list.items[1].download_url != NULL &&
+          strcmp(list.items[1].download_url, "https://inbound-cdn.resend.com/doc.pdf?sig=2") == 0);
+    CHECK(list.items[1].expires_at != NULL);
+    resend_received_attachment_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&list_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_page limited = {.before = "cursor-2", .limit = 5};
+    memset(&list, 0, sizeof list);
+    rc = resend_receiving_attachments_list(client, email_id, &limited, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f),
+                 "/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/attachments"
+                 "?before=cursor-2&limit=5") == 0);
+    resend_received_attachment_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&list_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    memset(&list, 0, sizeof list);
+    rc = resend_receiving_attachments_list(client, email_id, NULL, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f),
+                 "/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/attachments") == 0);
+    resend_received_attachment_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange get_ex = {.status = 200, .body = get_body};
+    f = fake_start(&get_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_received_attachment att = {0};
+    rc = resend_receiving_attachment_get(client, email_id, "", &att);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    rc = resend_receiving_attachment_get(client, "", att_id, &att);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    rc = resend_receiving_attachment_get(client, email_id, att_id, &att);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f),
+                 "/emails/receiving/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/attachments/"
+                 "2a0c9ce0-3112-4728-976e-47ddcd16a318") == 0);
+    CHECK(att.id != NULL && strcmp(att.id, att_id) == 0);
+    CHECK(att.filename != NULL && strcmp(att.filename, "avatar.png") == 0);
+    CHECK(att.content_type != NULL && strcmp(att.content_type, "image/png") == 0);
+    CHECK(att.content_disposition != NULL && strcmp(att.content_disposition, "inline") == 0);
+    CHECK(att.content_id != NULL && strcmp(att.content_id, "img001") == 0);
+    CHECK(att.size == 4096);
+    CHECK(att.download_url != NULL &&
+          strcmp(att.download_url, "https://inbound-cdn.resend.com/avatar.png?sig=1") == 0);
+    CHECK(att.expires_at != NULL && strcmp(att.expires_at, "2026-10-17T14:29:41.521Z") == 0);
+    resend_received_attachment_free(&att);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"filename\":\"x\"}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"id\":\"x\",\"size\":\"4\"}]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"download_url\":true}"},
+        {.status = 404, .body = "{\"name\":\"not_found\",\"message\":\"Attachment not found\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 3; i++) {
+        resend_received_attachment_list bad_list = {0};
+        rc = resend_receiving_attachments_list(client, email_id, NULL, &bad_list);
+        CHECK(rc == -1);
+        CHECK(bad_list.items == NULL);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        resend_received_attachment_list_free(&bad_list);
+    }
+    memset(&att, 0, sizeof att);
+    rc = resend_receiving_attachment_get(client, email_id, att_id, &att);
+    CHECK(rc == -1);
+    CHECK(att.id == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 200);
+    resend_received_attachment_free(&att);
+
+    memset(&att, 0, sizeof att);
+    rc = resend_receiving_attachment_get(client, email_id, att_id, &att);
+    CHECK(rc == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    resend_received_attachment_free(&att);
+    CHECK(fake_request_count(f) == 5);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/*
+ * HTTPS only, checked before any request. The fake is plain HTTP, so a
+ * successful download is not exercised here.
+ */
+static void test_download(void) {
+    fake_exchange exchange = {.status = 200, .body = "secret-bytes"};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    void *bytes = (void *)0x1;
+    size_t len = 1;
+    int rc = resend_download(client, NULL, &bytes, &len);
+    CHECK(rc == -1);
+    CHECK(bytes == NULL);
+    CHECK(len == 0);
+
+    bytes = (void *)0x1;
+    len = 1;
+    rc = resend_download(client, "http://example.com/x", &bytes, &len);
+    CHECK(rc == -1);
+    CHECK(bytes == NULL);
+    CHECK(len == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "download url must be https") == 0);
+    CHECK(fake_request_count(f) == 0);
+
+    bytes = (void *)0x1;
+    len = 1;
+    rc = resend_download(client, "https://example.com/\n", &bytes, &len);
+    CHECK(rc == -1);
+    CHECK(bytes == NULL);
+    CHECK(len == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "invalid download url") == 0);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_free(client);
+    fake_stop(f);
+}
+
 int main(void) {
     test_send();
     test_error_body();
@@ -1676,6 +2455,10 @@ int main(void) {
     test_emails_list_bad();
     test_emails_get_bad();
     test_webhook_verify();
+    test_receiving_get();
+    test_receiving_list();
+    test_receiving_attachments();
+    test_download();
     if (failures != 0) {
         fprintf(stderr, "%d failure%s\n", failures, failures == 1 ? "" : "s");
         return 1;

@@ -1,6 +1,7 @@
 #include "internal.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -573,4 +574,111 @@ int json_opt_bool(const char *json, size_t len, const char *key, int *out) {
     if (token_is(val, val_end, "false"))
         return 0;
     return -1;
+}
+
+static int parse_i64(const char *p, const char *end, int64_t *out) {
+    p = json_skip_ws(p, end);
+    int neg = 0;
+    if (p < end && *p == '-') {
+        neg = 1;
+        p++;
+    }
+    if (p >= end || *p < '0' || *p > '9')
+        return -1;
+    const char *digs = p;
+    if (*p == '0')
+        p++;
+    else
+        while (p < end && *p >= '0' && *p <= '9')
+            p++;
+    const char *digs_end = p;
+    if (json_skip_ws(p, end) != end)
+        return -1;
+
+    uint64_t mag = 0;
+    for (const char *d = digs; d < digs_end; d++) {
+        unsigned digit = (unsigned)(*d - '0');
+        if (mag > (UINT64_MAX - digit) / 10)
+            return -1;
+        mag = mag * 10u + digit;
+    }
+    if (neg) {
+        if (mag > (uint64_t)INT64_MAX + 1)
+            return -1;
+        *out = mag == (uint64_t)INT64_MAX + 1 ? INT64_MIN : -(int64_t)mag;
+        return 0;
+    }
+    if (mag > (uint64_t)INT64_MAX)
+        return -1;
+    *out = (int64_t)mag;
+    return 0;
+}
+
+int json_opt_i64(const char *json, size_t len, const char *key, int64_t *out) {
+    if (!out)
+        return -1;
+    *out = 0;
+    const char *val = NULL;
+    const char *val_end = NULL;
+    int st = member_at(json, len, key, &val, &val_end);
+    if (st < 0)
+        return -1;
+    if (st > 0)
+        return 0;
+    val = json_skip_ws(val, val_end);
+    if (json_is_null(val, val_end))
+        return 0;
+    return parse_i64(val, val_end, out);
+}
+
+int json_each_member(const char *json, size_t len,
+                     int (*fn)(const char *key, const char *val, const char *val_end, void *ctx),
+                     void *ctx) {
+    if (!json || !fn)
+        return -1;
+    const char *end = json + len;
+    const char *p = json_skip_ws(json, end);
+    if (p >= end || *p != '{')
+        return -1;
+    p++;
+    p = json_skip_ws(p, end);
+    if (p < end && *p == '}') {
+        if (json_skip_ws(p + 1, end) != end)
+            return -1;
+        return 0;
+    }
+    for (;;) {
+        char *key = NULL;
+        if (json_parse_string(p, end, &key, &p) != 0)
+            return -1;
+        p = json_skip_ws(p, end);
+        if (p >= end || *p != ':') {
+            free(key);
+            return -1;
+        }
+        p++;
+        p = json_skip_ws(p, end);
+        const char *start = p;
+        if (json_skip_value(p, end, &p) != 0 || p == start) {
+            free(key);
+            return -1;
+        }
+        int rc = fn(key, start, p, ctx);
+        free(key);
+        if (rc != 0)
+            return rc;
+        p = json_skip_ws(p, end);
+        if (p < end && *p == ',') {
+            p = json_skip_ws(p + 1, end);
+            if (p >= end || *p == '}')
+                return -1;
+            continue;
+        }
+        if (p < end && *p == '}') {
+            if (json_skip_ws(p + 1, end) != end)
+                return -1;
+            return 0;
+        }
+        return -1;
+    }
 }
