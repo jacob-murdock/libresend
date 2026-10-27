@@ -277,8 +277,8 @@ typedef struct {
 
 typedef struct {
     const char *sending;   /* "enabled", "disabled", or NULL to omit */
-    const char *receiving; /* NULL omits. Create defaults receiving to "disabled". */
-} resend_capabilities;
+    const char *receiving; /* "enabled", "disabled", or NULL to omit */
+} resend_capabilities; /* NULL omits "capabilities"; {0} sends {} and the API decides. */
 
 typedef struct {
     char *id;
@@ -287,12 +287,13 @@ typedef struct {
     char *region;
     char *sending;   /* capabilities.sending */
     char *receiving; /* capabilities.receiving */
-    int open_tracking;
-    int click_tracking;
+    int open_tracking;  /* 0 when missing, null, or false */
+    int click_tracking; /* 0 when missing, null, or false */
     char *tracking_subdomain;       /* NULL on list */
     resend_dns_record *records;     /* NULL on list; set on get and create */
     size_t record_count;
     char *created_at;
+    /* tls and custom_return_path are inputs only; the API never returns them. */
 } resend_domain;
 
 typedef struct {
@@ -303,7 +304,7 @@ typedef struct {
 
 typedef struct {
     const char *name; /* required */
-    const char *region;
+    const char *region; /* "us-east-1" (default), "eu-west-1", "sa-east-1", "ap-northeast-1" */
     const char *custom_return_path;
     const char *tls; /* "opportunistic" or "enforced", or NULL */
     const char *tracking_subdomain;
@@ -355,6 +356,8 @@ typedef struct {
 
 int resend_api_keys_create(resend *client, const resend_api_key_create *key, resend_api_key *out);
 int resend_api_keys_list(resend *client, const resend_page *page, resend_api_key_list *out);
+/* Renames the key. name is required. */
+int resend_api_keys_update(resend *client, const char *api_key_id, const char *name);
 int resend_api_keys_remove(resend *client, const char *api_key_id);
 
 void resend_api_key_free(resend_api_key *key);

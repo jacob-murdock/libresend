@@ -59,7 +59,7 @@ resend_received_free(&email);
 
 List results carry the envelope and attachment metadata. Get also fills `html`, `text`, `headers`, `received_for`, `authentication`, and `raw`. `authentication` is the SPF, DKIM, and DMARC result Resend computed.
 
-Attachments on the email have no download URL. `resend_receiving_attachments_list` and `resend_receiving_attachment_get` return a signed `download_url` and `expires_at`. `resend_download` GETs that HTTPS URL, or `raw.download_url`, and follows redirects that stay on HTTPS. The call fails past 64 MiB instead of buffering without limit.
+Attachments on the email have no download URL. `resend_receiving_attachments_list` and `resend_receiving_attachment_get` return a signed `download_url` and `expires_at`. `resend_download` GETs that HTTPS URL, or `raw.download_url`, and follows redirects that stay on HTTPS. It honors proxy environment variables. The call fails past 64 MiB instead of buffering without limit.
 
 ## Webhooks
 
@@ -80,9 +80,9 @@ resend_event_free(&event);
 
 ## Domains and API keys
 
-`resend_domains_create` returns the DNS records to publish. `record` is the purpose (`SPF`, `DKIM`, `Receiving`, `Tracking`, `TrackingCAA`). `type` is the DNS type (`MX`, `TXT`, `CNAME`, `CAA`). Receiving stays off until `capabilities.receiving` is `"enabled"`. A domain list omits records; get and create include them. `resend_domains_verify` starts DNS checks. `resend_domains_update` changes tracking, TLS, and capabilities; pass NULL for a field to leave it.
+`resend_domains_create` returns the DNS records to publish. `record` is the purpose (`SPF`, `DKIM`, `Receiving`, `Tracking`, `TrackingCAA`). `type` is the DNS type (`MX`, `TXT`, `CNAME`, `CAA`). Receiving stays off until `capabilities.receiving` is `"enabled"`. A domain list omits records; get and create include them. `resend_domains_verify` starts DNS checks. `resend_domains_update` changes tracking, TLS, and capabilities; pass NULL for a field to leave it. NULL `capabilities` leaves the object out; a zeroed one sends `{}` and the API decides. `region` is `us-east-1` (default), `eu-west-1`, `sa-east-1`, or `ap-northeast-1`. TLS mode and `custom_return_path` are inputs only; get and list can't report them, because the API doesn't return them.
 
-`resend_api_keys_create` takes `full_access` or `sending_access`. A sending key can be limited to one `domain_id`. `token` is present only on create.
+`resend_api_keys_create` takes `full_access` or `sending_access`. A sending key can be limited to one `domain_id`. `token` is present only on create. `resend_api_keys_update` renames a key; the response is only its id.
 
 ## Calls
 
@@ -94,7 +94,7 @@ Lists take a `resend_page` (`after`, `before`, `limit`). NULL omits pagination. 
 | Receiving | `resend_receiving_get`, `resend_receiving_list`, `resend_receiving_attachments_list`, `resend_receiving_attachment_get`, `resend_download` |
 | Webhooks | `resend_webhook_verify` |
 | Domains | `resend_domains_create`, `resend_domains_get`, `resend_domains_list`, `resend_domains_verify`, `resend_domains_update`, `resend_domains_remove` |
-| API keys | `resend_api_keys_create`, `resend_api_keys_list`, `resend_api_keys_remove` |
+| API keys | `resend_api_keys_create`, `resend_api_keys_list`, `resend_api_keys_update`, `resend_api_keys_remove` |
 
 ## Contract
 

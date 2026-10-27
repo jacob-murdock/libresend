@@ -37,6 +37,11 @@ static int header_prefix(fake *f, const char *name, const char *prefix) {
     return got != NULL && strncmp(got, prefix, strlen(prefix)) == 0;
 }
 
+static int body_eq(fake *f, const char *want) {
+    const char *got = fake_body(f);
+    return got != NULL && strcmp(got, want) == 0;
+}
+
 static resend_send smoke_message(const char *const *to) {
     resend_send message = {
         .from = "Acme <hello@example.com>",
@@ -2433,6 +2438,1535 @@ static void test_download(void) {
     fake_stop(f);
 }
 
+/*
+ * GET /domains/{id}. Records carry record, name, type, value, status, and ttl.
+ * priority is -1 when the field is missing or null; 0 is a real MX priority.
+ * sending and receiving are the capabilities strings ("enabled" or "disabled").
+ * tracking_subdomain is set on get. Unknown fields are ignored.
+ */
+static void test_domains_get(void) {
+    static const char id[] = "d91cd9bd-1176-453e-8fc1-35364d380206";
+    static const char body[] =
+        "{\"object\":\"domain\","
+        "\"id\":\"d91cd9bd-1176-453e-8fc1-35364d380206\","
+        "\"name\":\"example.com\","
+        "\"status\":\"not_started\","
+        "\"created_at\":\"2023-04-26 20:21:26.347412+00\","
+        "\"region\":\"us-east-1\","
+        "\"open_tracking\":true,"
+        "\"click_tracking\":false,"
+        "\"tracking_subdomain\":\"links\","
+        "\"custom_return_path\":\"send\","
+        "\"capabilities\":{\"sending\":\"enabled\",\"receiving\":\"disabled\",\"extra\":1},"
+        "\"records\":["
+        "{\"record\":\"SPF\",\"name\":\"send\",\"type\":\"MX\",\"ttl\":\"Auto\","
+        "\"status\":\"not_started\",\"value\":\"feedback-smtp.us-east-1.amazonses.com\","
+        "\"priority\":10,\"ignored\":true},"
+        "{\"record\":\"SPF\",\"name\":\"send\","
+        "\"value\":\"\\\"v=spf1 include:amazonses.com ~all\\\"\","
+        "\"type\":\"TXT\",\"ttl\":\"Auto\",\"status\":\"not_started\"},"
+        "{\"record\":\"DKIM\",\"name\":\"resend._domainkey\",\"value\":\"p=MIGfMA0\","
+        "\"type\":\"TXT\",\"status\":\"not_started\",\"ttl\":\"Auto\",\"priority\":null},"
+        "{\"record\":\"Receiving\",\"name\":\"example.com\","
+        "\"value\":\"inbound-smtp.us-east-1.amazonaws.com\",\"type\":\"MX\","
+        "\"ttl\":\"Auto\",\"status\":\"verified\",\"priority\":0},"
+        "{\"record\":\"Tracking\",\"name\":\"links.example.com\",\"type\":\"CNAME\","
+        "\"value\":\"links1.resend-dns.com\",\"ttl\":\"Auto\",\"status\":\"temporary_failure\"},"
+        "{\"record\":\"TrackingCAA\",\"name\":\"links.example.com\","
+        "\"value\":\"0 issue \\\"pki.resend.com\\\"\",\"type\":\"CAA\",\"ttl\":\"Auto\","
+        "\"status\":\"failed\"}"
+        "]}";
+
+    resend_domain domain = {0};
+    CHECK(resend_domains_get(NULL, id, &domain) == -1);
+
+    fake_exchange exchange = {.status = 200, .body = body};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    int rc = resend_domains_get(client, "", &domain);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    rc = resend_domains_get(client, id, NULL);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    rc = resend_domains_get(client, id, &domain);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/domains/d91cd9bd-1176-453e-8fc1-35364d380206") == 0);
+    CHECK(header_eq(f, "Authorization", "Bearer re_test"));
+    CHECK(fake_body(f) == NULL || fake_body(f)[0] == '\0');
+    CHECK(domain.id != NULL && strcmp(domain.id, id) == 0);
+    CHECK(domain.name != NULL && strcmp(domain.name, "example.com") == 0);
+    CHECK(domain.status != NULL && strcmp(domain.status, "not_started") == 0);
+    CHECK(domain.region != NULL && strcmp(domain.region, "us-east-1") == 0);
+    CHECK(domain.created_at != NULL &&
+          strcmp(domain.created_at, "2023-04-26 20:21:26.347412+00") == 0);
+    CHECK(domain.open_tracking == 1);
+    CHECK(domain.click_tracking == 0);
+    CHECK(domain.tracking_subdomain != NULL && strcmp(domain.tracking_subdomain, "links") == 0);
+    CHECK(domain.sending != NULL && strcmp(domain.sending, "enabled") == 0);
+    CHECK(domain.receiving != NULL && strcmp(domain.receiving, "disabled") == 0);
+    CHECK(domain.records != NULL && domain.record_count == 6);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].record != NULL &&
+          strcmp(domain.records[0].record, "SPF") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].name != NULL &&
+          strcmp(domain.records[0].name, "send") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].type != NULL &&
+          strcmp(domain.records[0].type, "MX") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].value != NULL &&
+          strcmp(domain.records[0].value, "feedback-smtp.us-east-1.amazonses.com") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].status != NULL &&
+          strcmp(domain.records[0].status, "not_started") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].ttl != NULL &&
+          strcmp(domain.records[0].ttl, "Auto") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].priority == 10);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].value != NULL &&
+          strcmp(domain.records[1].value, "\"v=spf1 include:amazonses.com ~all\"") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].type != NULL &&
+          strcmp(domain.records[1].type, "TXT") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].priority == -1);
+    CHECK(domain.records != NULL && domain.record_count > 2 && domain.records[2].record != NULL &&
+          strcmp(domain.records[2].record, "DKIM") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 2 && domain.records[2].name != NULL &&
+          strcmp(domain.records[2].name, "resend._domainkey") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 2 && domain.records[2].priority == -1);
+    CHECK(domain.records != NULL && domain.record_count > 3 && domain.records[3].record != NULL &&
+          strcmp(domain.records[3].record, "Receiving") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 3 && domain.records[3].type != NULL &&
+          strcmp(domain.records[3].type, "MX") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 3 && domain.records[3].status != NULL &&
+          strcmp(domain.records[3].status, "verified") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 3 && domain.records[3].priority == 0);
+    CHECK(domain.records != NULL && domain.record_count > 4 && domain.records[4].record != NULL &&
+          strcmp(domain.records[4].record, "Tracking") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 4 && domain.records[4].type != NULL &&
+          strcmp(domain.records[4].type, "CNAME") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 4 && domain.records[4].status != NULL &&
+          strcmp(domain.records[4].status, "temporary_failure") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 4 && domain.records[4].priority == -1);
+    CHECK(domain.records != NULL && domain.record_count > 5 && domain.records[5].record != NULL &&
+          strcmp(domain.records[5].record, "TrackingCAA") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 5 && domain.records[5].type != NULL &&
+          strcmp(domain.records[5].type, "CAA") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 5 && domain.records[5].value != NULL &&
+          strcmp(domain.records[5].value, "0 issue \"pki.resend.com\"") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 5 && domain.records[5].status != NULL &&
+          strcmp(domain.records[5].status, "failed") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 5 && domain.records[5].ttl != NULL &&
+          strcmp(domain.records[5].ttl, "Auto") == 0);
+    resend_domain_free(&domain);
+    CHECK(domain.id == NULL);
+    CHECK(domain.records == NULL);
+    CHECK(domain.record_count == 0);
+    CHECK(domain.sending == NULL);
+    CHECK(domain.tracking_subdomain == NULL);
+    resend_domain_free(&domain);
+    resend_domain_free(NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char absent_body[] =
+        "{\"id\":\"d91cd9bd-1176-453e-8fc1-35364d380206\",\"name\":\"example.com\"}";
+    fake_exchange absent = {.status = 200, .body = absent_body};
+    f = fake_start(&absent, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_get(client, id, &domain);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/domains/d91cd9bd-1176-453e-8fc1-35364d380206") == 0);
+    CHECK(domain.id != NULL && strcmp(domain.id, id) == 0);
+    CHECK(domain.name != NULL && strcmp(domain.name, "example.com") == 0);
+    CHECK(domain.status == NULL);
+    CHECK(domain.region == NULL);
+    CHECK(domain.created_at == NULL);
+    CHECK(domain.open_tracking == 0);
+    CHECK(domain.click_tracking == 0);
+    CHECK(domain.tracking_subdomain == NULL);
+    CHECK(domain.sending == NULL);
+    CHECK(domain.receiving == NULL);
+    CHECK(domain.records == NULL);
+    CHECK(domain.record_count == 0);
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char nulls_body[] =
+        "{\"id\":\"d91cd9bd-1176-453e-8fc1-35364d380206\","
+        "\"name\":null,\"status\":null,\"region\":null,\"created_at\":null,"
+        "\"open_tracking\":false,\"click_tracking\":null,\"tracking_subdomain\":null,"
+        "\"capabilities\":null,\"records\":[]}";
+    fake_exchange nulls = {.status = 200, .body = nulls_body};
+    f = fake_start(&nulls, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_get(client, id, &domain);
+    CHECK(rc == 0);
+    CHECK(domain.id != NULL && strcmp(domain.id, id) == 0);
+    CHECK(domain.name == NULL);
+    CHECK(domain.status == NULL);
+    CHECK(domain.region == NULL);
+    CHECK(domain.created_at == NULL);
+    CHECK(domain.open_tracking == 0);
+    CHECK(domain.click_tracking == 0);
+    CHECK(domain.tracking_subdomain == NULL);
+    CHECK(domain.sending == NULL);
+    CHECK(domain.receiving == NULL);
+    CHECK(domain.records == NULL);
+    CHECK(domain.record_count == 0);
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char swapped_body[] =
+        "{\"id\":\"d1\",\"tracking_subdomain\":\"click\",\"open_tracking\":true,"
+        "\"click_tracking\":true,"
+        "\"capabilities\":{\"sending\":\"disabled\",\"receiving\":\"enabled\"},"
+        "\"records\":[{},{\"record\":\"SPF\",\"priority\":null,\"ttl\":null}]}";
+    fake_exchange swapped = {.status = 200, .body = swapped_body};
+    f = fake_start(&swapped, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_get(client, "d1", &domain);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains/d1") == 0);
+    CHECK(domain.id != NULL && strcmp(domain.id, "d1") == 0);
+    CHECK(domain.tracking_subdomain != NULL && strcmp(domain.tracking_subdomain, "click") == 0);
+    CHECK(domain.open_tracking == 1);
+    CHECK(domain.click_tracking == 1);
+    CHECK(domain.sending != NULL && strcmp(domain.sending, "disabled") == 0);
+    CHECK(domain.receiving != NULL && strcmp(domain.receiving, "enabled") == 0);
+    CHECK(domain.records != NULL && domain.record_count == 2);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].record == NULL);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].name == NULL);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].type == NULL);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].value == NULL);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].status == NULL);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].ttl == NULL);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].priority == -1);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].record != NULL &&
+          strcmp(domain.records[1].record, "SPF") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].ttl == NULL);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].priority == -1);
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char sending_only_body[] =
+        "{\"id\":\"d1\",\"capabilities\":{\"sending\":\"enabled\"}}";
+    fake_exchange sending_only = {.status = 200, .body = sending_only_body};
+    f = fake_start(&sending_only, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_get(client, "d1", &domain);
+    CHECK(rc == 0);
+    CHECK(domain.sending != NULL && strcmp(domain.sending, "enabled") == 0);
+    CHECK(domain.receiving == NULL);
+    CHECK(domain.records == NULL);
+    CHECK(domain.record_count == 0);
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char bounds_body[] =
+        "{\"id\":\"bounds\",\"records\":[{\"priority\":2147483647},{\"priority\":-2147483648}]}";
+    fake_exchange bounds = {.status = 200, .body = bounds_body};
+    f = fake_start(&bounds, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_get(client, "bounds", &domain);
+    CHECK(rc == 0);
+    CHECK(domain.records != NULL && domain.record_count == 2);
+    CHECK(domain.records != NULL && domain.record_count > 0 &&
+          domain.records[0].priority == 2147483647);
+    CHECK(domain.records != NULL && domain.record_count > 1 &&
+          domain.records[1].priority == -2147483647 - 1);
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char encoded_id[] = "a/b c\n?";
+    static const char encoded_body[] =
+        "{\"id\":\"a/b c\\n?\",\"tracking_subdomain\":\"links\"}";
+    fake_exchange encoded = {.status = 200, .body = encoded_body};
+    f = fake_start(&encoded, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_get(client, encoded_id, &domain);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains/a%2Fb%20c%0A%3F") == 0);
+    CHECK(domain.id != NULL && strcmp(domain.id, encoded_id) == 0);
+    CHECK(domain.tracking_subdomain != NULL && strcmp(domain.tracking_subdomain, "links") == 0);
+    CHECK(domain.records == NULL);
+    CHECK(domain.sending == NULL);
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "null"},
+        {.status = 200, .body = "[]"},
+        {.status = 200, .body = "{\"name\":\"example.com\"}"},
+        {.status = 200, .body = "{\"id\":null}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"records\":{}}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"records\":[null]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"records\":[{\"priority\":\"10\"}]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"records\":[{\"priority\":10.5}]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"records\":[{\"priority\":2147483648}]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"records\":[{\"priority\":-2147483649}]}"},
+        {.status = 200,
+         .body = "{\"id\":\"x\",\"name\":\"example.com\",\"records\":["
+                 "{\"record\":\"SPF\",\"name\":\"send\",\"priority\":10},{\"ttl\":1}]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"capabilities\":[]}"},
+        {.status = 200,
+         .body = "{\"id\":\"x\",\"capabilities\":{\"sending\":true,\"receiving\":\"disabled\"}}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"tracking_subdomain\":1}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"open_tracking\":\"true\"}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"click_tracking\":1}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"records\":[{\"name\":\"a\",}]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"region\":true}"},
+        {.status = 404,
+         .body = "{\"name\":\"not_found\",\"message\":\"Domain not found\","
+                 "\"id\":\"should-not-parse\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i + 1 < sizeof bad / sizeof bad[0]; i++) {
+        memset(&domain, 0x5a, sizeof domain);
+        rc = resend_domains_get(client, "x", &domain);
+        CHECK(rc == -1);
+        CHECK(domain.id == NULL);
+        CHECK(domain.name == NULL);
+        CHECK(domain.sending == NULL);
+        CHECK(domain.receiving == NULL);
+        CHECK(domain.tracking_subdomain == NULL);
+        CHECK(domain.records == NULL);
+        CHECK(domain.record_count == 0);
+        const resend_error *err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        CHECK(err->message != NULL && err->message[0] != '\0');
+        resend_domain_free(&domain);
+    }
+    memset(&domain, 0x5a, sizeof domain);
+    rc = resend_domains_get(client, id, &domain);
+    CHECK(rc == -1);
+    CHECK(domain.id == NULL);
+    CHECK(domain.records == NULL);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "Domain not found") == 0);
+    resend_domain_free(&domain);
+    CHECK(fake_request_count(f) == (int)(sizeof bad / sizeof bad[0]));
+    resend_free(client);
+    fake_stop(f);
+}
+
+/*
+ * GET /domains. Page helper and has_more. records and tracking_subdomain stay
+ * NULL even when the payload carries them.
+ */
+static void test_domains_list(void) {
+    static const char id[] = "d91cd9bd-1176-453e-8fc1-35364d380206";
+    static const char body[] =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"d91cd9bd-1176-453e-8fc1-35364d380206\","
+        "\"name\":\"example.com\",\"status\":\"verified\",\"region\":\"eu-west-1\","
+        "\"created_at\":\"2023-04-26 20:21:26.347412+00\","
+        "\"open_tracking\":false,\"click_tracking\":true,"
+        "\"tracking_subdomain\":1,"
+        "\"capabilities\":{\"sending\":\"enabled\",\"receiving\":\"disabled\",\"extra\":true},"
+        "\"records\":[{\"record\":\"SPF\",\"name\":\"send\",\"type\":\"MX\","
+        "\"value\":\"should-not-copy\",\"status\":\"not_started\",\"ttl\":\"Auto\",\"priority\":10}]},"
+        "{\"id\":\"d2\",\"name\":\"other.example\",\"status\":\"pending\","
+        "\"region\":\"us-east-1\",\"created_at\":\"2024-01-01 00:00:00.000+00\"}"
+        "]}";
+
+    resend_domain_list list = {0};
+    CHECK(resend_domains_list(NULL, NULL, &list) == -1);
+
+    fake_exchange exchange = {.status = 200, .body = body};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_page both = {.after = "a", .before = "b", .limit = 10};
+    memset(&list, 0x5a, sizeof list);
+    int rc = resend_domains_list(client, &both, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(list.items == NULL);
+    CHECK(list.count == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "after and before cannot be combined") == 0);
+
+    resend_page page = {.after = "cursor-1", .limit = 0};
+    rc = resend_domains_list(client, &page, &list);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains?after=cursor-1") == 0);
+    CHECK(header_eq(f, "Authorization", "Bearer re_test"));
+    CHECK(list.has_more == 1);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL && strcmp(list.items[0].id, id) == 0);
+    CHECK(list.items[0].name != NULL && strcmp(list.items[0].name, "example.com") == 0);
+    CHECK(list.items[0].status != NULL && strcmp(list.items[0].status, "verified") == 0);
+    CHECK(list.items[0].region != NULL && strcmp(list.items[0].region, "eu-west-1") == 0);
+    CHECK(list.items[0].created_at != NULL &&
+          strcmp(list.items[0].created_at, "2023-04-26 20:21:26.347412+00") == 0);
+    CHECK(list.items[0].open_tracking == 0);
+    CHECK(list.items[0].click_tracking == 1);
+    CHECK(list.items[0].tracking_subdomain == NULL);
+    CHECK(list.items[0].sending != NULL && strcmp(list.items[0].sending, "enabled") == 0);
+    CHECK(list.items[0].receiving != NULL && strcmp(list.items[0].receiving, "disabled") == 0);
+    CHECK(list.items[0].records == NULL);
+    CHECK(list.items[0].record_count == 0);
+    CHECK(list.items[1].id != NULL && strcmp(list.items[1].id, "d2") == 0);
+    CHECK(list.items[1].name != NULL && strcmp(list.items[1].name, "other.example") == 0);
+    CHECK(list.items[1].status != NULL && strcmp(list.items[1].status, "pending") == 0);
+    CHECK(list.items[1].open_tracking == 0);
+    CHECK(list.items[1].click_tracking == 0);
+    CHECK(list.items[1].sending == NULL);
+    CHECK(list.items[1].receiving == NULL);
+    CHECK(list.items[1].tracking_subdomain == NULL);
+    CHECK(list.items[1].records == NULL);
+    resend_domain_list_free(&list);
+    CHECK(list.items == NULL);
+    CHECK(list.count == 0);
+    resend_domain_list_free(&list);
+    resend_domain_list_free(NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_page limited = {.before = "cursor-2", .limit = 5};
+    rc = resend_domains_list(client, &limited, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains?before=cursor-2&limit=5") == 0);
+    CHECK(list.has_more == 1);
+    CHECK(list.count == 2);
+    resend_domain_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char empty_body[] = "{\"has_more\":false,\"data\":[]}";
+    fake_exchange empty_ex = {.status = 200, .body = empty_body};
+    f = fake_start(&empty_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_list(client, NULL, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains") == 0);
+    CHECK(list.count == 0);
+    CHECK(list.items == NULL);
+    CHECK(list.has_more == 0);
+    resend_domain_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&empty_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_page encoded = {.after = "a b&c=d"};
+    rc = resend_domains_list(client, &encoded, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains?after=a%20b%26c%3Dd") == 0);
+    resend_domain_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "{\"has_more\":truefoo,\"data\":[]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":nullfoo}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"name\":\"example.com\"}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"id\":\"x\"},]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[1]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"id\":\"x\",\"region\":true}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":null}"},
+        {.status = 200, .body = "{\"has_more\":true}"},
+        {.status = 404, .body = "{\"name\":\"not_found\",\"message\":\"Domain not found\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 7; i++) {
+        memset(&list, 0x5a, sizeof list);
+        rc = resend_domains_list(client, NULL, &list);
+        CHECK(rc == -1);
+        CHECK(list.items == NULL);
+        CHECK(list.count == 0);
+        CHECK(list.has_more == 0);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        CHECK(err->message != NULL && err->message[0] != '\0');
+        resend_domain_list_free(&list);
+    }
+    CHECK(resend_domains_list(client, NULL, &list) == 0);
+    CHECK(list.count == 0);
+    CHECK(list.items == NULL);
+    CHECK(list.has_more == 0);
+    resend_domain_list_free(&list);
+    CHECK(resend_domains_list(client, NULL, &list) == 0);
+    CHECK(list.count == 0);
+    CHECK(list.has_more == 1);
+    resend_domain_list_free(&list);
+    memset(&list, 0x5a, sizeof list);
+    rc = resend_domains_list(client, NULL, &list);
+    CHECK(rc == -1);
+    CHECK(list.items == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "Domain not found") == 0);
+    resend_domain_list_free(&list);
+    CHECK(fake_request_count(f) == (int)(sizeof bad / sizeof bad[0]));
+    resend_free(client);
+    fake_stop(f);
+}
+
+/* POST /domains. NULL capabilities omit the object. NULL fields inside are left out. */
+static void test_domains_create(void) {
+    static const char created[] =
+        "{\"object\":\"domain\","
+        "\"id\":\"d91cd9bd-1176-453e-8fc1-35364d380206\","
+        "\"name\":\"example.com\",\"status\":\"not_started\","
+        "\"created_at\":\"2023-04-26 20:21:26.347412+00\","
+        "\"region\":\"us-east-1\",\"open_tracking\":false,\"click_tracking\":false,"
+        "\"tracking_subdomain\":\"links\","
+        "\"capabilities\":{\"sending\":\"enabled\",\"receiving\":\"disabled\"},"
+        "\"records\":["
+        "{\"record\":\"SPF\",\"name\":\"send\",\"type\":\"MX\",\"ttl\":\"Auto\","
+        "\"status\":\"not_started\",\"value\":\"feedback-smtp.us-east-1.amazonses.com\","
+        "\"priority\":10},"
+        "{\"record\":\"DKIM\",\"name\":\"resend._domainkey\",\"type\":\"TXT\","
+        "\"ttl\":\"Auto\",\"status\":\"not_started\",\"value\":\"p=MIGfMA0\"}"
+        "]}";
+    fake_exchange ok = {.status = 201, .body = created};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_domain domain = {0};
+    CHECK(resend_domains_create(NULL, NULL, &domain) == -1);
+    CHECK(resend_domains_create(client, NULL, &domain) == -1);
+    CHECK(resend_domains_create(client, &(resend_domain_create){.name = "example.com"}, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_domain_create missing = {0};
+    memset(&domain, 0x5a, sizeof domain);
+    int rc = resend_domains_create(client, &missing, &domain);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(domain.id == NULL);
+    CHECK(domain.records == NULL);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing domain name") == 0);
+
+    resend_domain_create blank = {.name = ""};
+    rc = resend_domains_create(client, &blank, &domain);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_domain_create name_only = {.name = "example.com"};
+    rc = resend_domains_create(client, &name_only, &domain);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "POST") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains") == 0);
+    CHECK(body_eq(f, "{\"name\":\"example.com\"}"));
+    CHECK(domain.id != NULL && strcmp(domain.id, "d91cd9bd-1176-453e-8fc1-35364d380206") == 0);
+    CHECK(domain.name != NULL && strcmp(domain.name, "example.com") == 0);
+    CHECK(domain.status != NULL && strcmp(domain.status, "not_started") == 0);
+    CHECK(domain.region != NULL && strcmp(domain.region, "us-east-1") == 0);
+    CHECK(domain.created_at != NULL &&
+          strcmp(domain.created_at, "2023-04-26 20:21:26.347412+00") == 0);
+    CHECK(domain.tracking_subdomain != NULL && strcmp(domain.tracking_subdomain, "links") == 0);
+    CHECK(domain.sending != NULL && strcmp(domain.sending, "enabled") == 0);
+    CHECK(domain.receiving != NULL && strcmp(domain.receiving, "disabled") == 0);
+    CHECK(domain.records != NULL && domain.record_count == 2);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].record != NULL &&
+          strcmp(domain.records[0].record, "SPF") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 0 && domain.records[0].priority == 10);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].record != NULL &&
+          strcmp(domain.records[1].record, "DKIM") == 0);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].priority == -1);
+    CHECK(domain.records != NULL && domain.record_count > 1 && domain.records[1].value != NULL &&
+          strcmp(domain.records[1].value, "p=MIGfMA0") == 0);
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char id_only[] = "{\"id\":\"d1\"}";
+    fake_exchange id_ok = {.status = 201, .body = id_only};
+
+    f = fake_start(&id_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_capabilities sending = {.sending = "enabled"};
+    resend_domain_create with_sending = {.name = "example.com", .capabilities = &sending};
+    rc = resend_domains_create(client, &with_sending, &domain);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"name\":\"example.com\",\"capabilities\":{\"sending\":\"enabled\"}}"));
+    CHECK(domain.id != NULL && strcmp(domain.id, "d1") == 0);
+    CHECK(domain.records == NULL);
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&id_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_capabilities bare = {0};
+    resend_domain_create with_bare = {.name = "example.com", .capabilities = &bare};
+    rc = resend_domains_create(client, &with_bare, &domain);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"name\":\"example.com\",\"capabilities\":{}}"));
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&id_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_capabilities both = {.sending = "disabled", .receiving = "enabled"};
+    resend_domain_create with_both = {.name = "example.com", .capabilities = &both};
+    rc = resend_domains_create(client, &with_both, &domain);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"name\":\"example.com\",\"capabilities\":{\"sending\":\"disabled\","
+                     "\"receiving\":\"enabled\"}}"));
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&id_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    int open_on = 1;
+    int click_off = 0;
+    resend_capabilities full_caps = {.sending = "enabled"};
+    resend_domain_create full = {
+        .name = "example.com",
+        .region = "eu-west-1",
+        .custom_return_path = "bnc",
+        .tls = "enforced",
+        .tracking_subdomain = "links",
+        .open_tracking = &open_on,
+        .click_tracking = &click_off,
+        .capabilities = &full_caps,
+    };
+    rc = resend_domains_create(client, &full, &domain);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"name\":\"example.com\",\"region\":\"eu-west-1\","
+                     "\"custom_return_path\":\"bnc\",\"tls\":\"enforced\","
+                     "\"tracking_subdomain\":\"links\",\"open_tracking\":true,"
+                     "\"click_tracking\":false,\"capabilities\":{\"sending\":\"enabled\"}}"));
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&id_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_domain_create quoted = {.name = "a\"b"};
+    rc = resend_domains_create(client, &quoted, &domain);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"name\":\"a\\\"b\"}"));
+    resend_domain_free(&domain);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 201, .body = "not-json"},
+        {.status = 201, .body = "{\"name\":\"example.com\"}"},
+        {.status = 201, .body = "{\"id\":\"d1\",\"records\":[{\"ttl\":1}]}"},
+        {.status = 422, .body = "{\"name\":\"validation_error\",\"message\":\"Invalid name\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 3; i++) {
+        memset(&domain, 0x5a, sizeof domain);
+        rc = resend_domains_create(client, &name_only, &domain);
+        CHECK(rc == -1);
+        CHECK(domain.id == NULL);
+        CHECK(domain.records == NULL);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 201);
+        CHECK(err->message != NULL && err->message[0] != '\0');
+        resend_domain_free(&domain);
+    }
+    memset(&domain, 0x5a, sizeof domain);
+    rc = resend_domains_create(client, &name_only, &domain);
+    CHECK(rc == -1);
+    CHECK(domain.id == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "Invalid name") == 0);
+    resend_domain_free(&domain);
+    CHECK(fake_request_count(f) == (int)(sizeof bad / sizeof bad[0]));
+    resend_free(client);
+    fake_stop(f);
+}
+
+/* PATCH /domains/{id}. NULL fields are omitted. Receiving is not defaulted. */
+static void test_domains_update(void) {
+    static const char id[] = "d91cd9bd-1176-453e-8fc1-35364d380206";
+    fake_exchange ok = {.status = 200, .body = "{\"object\":\"domain\",\"id\":\"d1\"}"};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    CHECK(resend_domains_update(client, id, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(resend_domains_update(client, "", &(resend_domain_update){0}) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_domain_update empty = {0};
+    int rc = resend_domains_update(client, id, &empty);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "domain update needs a field") == 0);
+
+    int open_on = 1;
+    int click_off = 0;
+    resend_capabilities caps = {.sending = "enabled", .receiving = "disabled"};
+    resend_domain_update full = {
+        .tls = "enforced",
+        .tracking_subdomain = "links",
+        .open_tracking = &open_on,
+        .click_tracking = &click_off,
+        .capabilities = &caps,
+    };
+    rc = resend_domains_update(client, id, &full);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "PATCH") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/domains/d91cd9bd-1176-453e-8fc1-35364d380206") == 0);
+    CHECK(body_eq(f, "{\"tls\":\"enforced\",\"tracking_subdomain\":\"links\","
+                     "\"open_tracking\":true,\"click_tracking\":false,"
+                     "\"capabilities\":{\"sending\":\"enabled\",\"receiving\":\"disabled\"}}"));
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    int open_off = 0;
+    resend_domain_update only_open = {.open_tracking = &open_off};
+    rc = resend_domains_update(client, id, &only_open);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"open_tracking\":false}"));
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_capabilities sending = {.sending = "enabled"};
+    resend_domain_update only_sending = {.capabilities = &sending};
+    rc = resend_domains_update(client, id, &only_sending);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"capabilities\":{\"sending\":\"enabled\"}}"));
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_capabilities blank_caps = {0};
+    resend_domain_update caps_only = {.capabilities = &blank_caps};
+    rc = resend_domains_update(client, id, &caps_only);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"capabilities\":{}}"));
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_domain_update tls = {.tls = "opportunistic"};
+    rc = resend_domains_update(client, "a/b c\n?", &tls);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "PATCH") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains/a%2Fb%20c%0A%3F") == 0);
+    CHECK(body_eq(f, "{\"tls\":\"opportunistic\"}"));
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange missing = {
+        .status = 404,
+        .body = "{\"name\":\"not_found\",\"message\":\"Domain not found\"}",
+    };
+    f = fake_start(&missing, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_update(client, id, &tls);
+    CHECK(rc == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "Domain not found") == 0);
+    resend_free(client);
+    fake_stop(f);
+}
+
+static void test_domains_verify_remove(void) {
+    static const char id[] = "d91cd9bd-1176-453e-8fc1-35364d380206";
+    fake_exchange ok = {.status = 200, .body = "{\"object\":\"domain\",\"id\":\"d1\"}"};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    CHECK(resend_domains_verify(NULL, id) == -1);
+    CHECK(resend_domains_verify(client, "") == -1);
+    CHECK(resend_domains_verify(client, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    int rc = resend_domains_verify(client, id);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "POST") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/domains/d91cd9bd-1176-453e-8fc1-35364d380206/verify") == 0);
+    CHECK(fake_body(f) == NULL || fake_body(f)[0] == '\0');
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_verify(client, "a/b c\n?");
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/domains/a%2Fb%20c%0A%3F/verify") == 0);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange missing = {
+        .status = 404,
+        .body = "{\"name\":\"not_found\",\"message\":\"Domain not found\"}",
+    };
+    f = fake_start(&missing, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_verify(client, id);
+    CHECK(rc == -1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange removed = {
+        .status = 200,
+        .body = "{\"object\":\"domain\",\"id\":\"d1\",\"deleted\":true}",
+    };
+    f = fake_start(&removed, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    CHECK(resend_domains_remove(client, "") == -1);
+    CHECK(resend_domains_remove(client, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+    rc = resend_domains_remove(client, id);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "DELETE") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/domains/d91cd9bd-1176-453e-8fc1-35364d380206") == 0);
+    CHECK(fake_body(f) == NULL || fake_body(f)[0] == '\0');
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&missing, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_domains_remove(client, id);
+    CHECK(rc == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->message != NULL && strcmp(err->message, "Domain not found") == 0);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/* POST /api-keys. token is set. name and created_at stay NULL. */
+static void test_api_keys_create(void) {
+    static const char created[] =
+        "{\"id\":\"key_1\",\"token\":\"re_123\",\"name\":\"should-stay-null\","
+        "\"created_at\":\"2023-10-06 23:47:56.678+00\"}";
+    fake_exchange ok = {.status = 201, .body = created};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_api_key key = {0};
+    CHECK(resend_api_keys_create(NULL, NULL, &key) == -1);
+    CHECK(resend_api_keys_create(client, NULL, &key) == -1);
+    CHECK(resend_api_keys_create(client, &(resend_api_key_create){.name = "prod"}, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_api_key_create missing = {0};
+    memset(&key, 0x5a, sizeof key);
+    int rc = resend_api_keys_create(client, &missing, &key);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(key.id == NULL);
+    CHECK(key.token == NULL);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing api key name") == 0);
+
+    resend_api_key_create bad_perm = {.name = "prod", .permission = "admin"};
+    rc = resend_api_keys_create(client, &bad_perm, &key);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "permission must be full_access or sending_access") == 0);
+
+    resend_api_key_create full_with_domain = {
+        .name = "prod",
+        .permission = "full_access",
+        .domain_id = "d1",
+    };
+    rc = resend_api_keys_create(client, &full_with_domain, &key);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "domain_id requires sending_access") == 0);
+
+    resend_api_key_create domain_only = {.name = "prod", .domain_id = "d1"};
+    rc = resend_api_keys_create(client, &domain_only, &key);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_api_key_create full = {.name = "prod", .permission = "full_access"};
+    rc = resend_api_keys_create(client, &full, &key);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "POST") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/api-keys") == 0);
+    CHECK(body_eq(f, "{\"name\":\"prod\",\"permission\":\"full_access\"}"));
+    CHECK(key.id != NULL && strcmp(key.id, "key_1") == 0);
+    CHECK(key.token != NULL && strcmp(key.token, "re_123") == 0);
+    CHECK(key.name == NULL);
+    CHECK(key.created_at == NULL);
+    CHECK(key.last_used_at == NULL);
+    resend_api_key_free(&key);
+    CHECK(key.token == NULL);
+    resend_api_key_free(&key);
+    resend_api_key_free(NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char token_only[] = "{\"id\":\"key_2\",\"token\":\"re_send\"}";
+    fake_exchange token_ok = {.status = 201, .body = token_only};
+
+    f = fake_start(&token_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_api_key_create sending = {
+        .name = "send",
+        .permission = "sending_access",
+        .domain_id = "d_123",
+    };
+    rc = resend_api_keys_create(client, &sending, &key);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"name\":\"send\",\"permission\":\"sending_access\",\"domain_id\":\"d_123\"}"));
+    CHECK(key.token != NULL && strcmp(key.token, "re_send") == 0);
+    CHECK(key.name == NULL);
+    resend_api_key_free(&key);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&token_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_api_key_create sending_any = {.name = "send", .permission = "sending_access"};
+    rc = resend_api_keys_create(client, &sending_any, &key);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"name\":\"send\",\"permission\":\"sending_access\"}"));
+    resend_api_key_free(&key);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&token_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_api_key_create name_only = {.name = "prod"};
+    rc = resend_api_keys_create(client, &name_only, &key);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"name\":\"prod\"}"));
+    resend_api_key_free(&key);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 201, .body = "not-json"},
+        {.status = 201, .body = "{\"id\":\"key_1\",\"name\":\"prod\"}"},
+        {.status = 201, .body = "{\"token\":\"re_123\"}"},
+        {.status = 422, .body = "{\"name\":\"validation_error\",\"message\":\"Invalid name\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 3; i++) {
+        memset(&key, 0x5a, sizeof key);
+        rc = resend_api_keys_create(client, &name_only, &key);
+        CHECK(rc == -1);
+        CHECK(key.id == NULL);
+        CHECK(key.token == NULL);
+        CHECK(key.name == NULL);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 201);
+        CHECK(err->message != NULL && err->message[0] != '\0');
+        resend_api_key_free(&key);
+    }
+    rc = resend_api_keys_create(client, &name_only, &key);
+    CHECK(rc == -1);
+    CHECK(key.token == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+    resend_api_key_free(&key);
+    CHECK(fake_request_count(f) == 4);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/* GET /api-keys. Page helper, has_more, last_used_at. token stays NULL. */
+static void test_api_keys_list(void) {
+    static const char body[] =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"key_1\",\"name\":\"prod\","
+        "\"created_at\":\"2023-10-06 23:47:56.678+00\","
+        "\"last_used_at\":\"2024-01-02 03:04:05.678+00\","
+        "\"token\":\"re_should_not_copy\"},"
+        "{\"id\":\"key_2\",\"name\":\"send\","
+        "\"created_at\":\"2023-11-01 00:00:00.000+00\","
+        "\"last_used_at\":null,\"token\":1}"
+        "]}";
+    fake_exchange exchange = {.status = 200, .body = body};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_api_key_list list = {0};
+    resend_page both = {.after = "a", .before = "b"};
+    memset(&list, 0x5a, sizeof list);
+    int rc = resend_api_keys_list(client, &both, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(list.items == NULL);
+    CHECK(list.count == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "after and before cannot be combined") == 0);
+
+    resend_page page = {.after = "cursor-1", .limit = 0};
+    rc = resend_api_keys_list(client, &page, &list);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/api-keys?after=cursor-1") == 0);
+    CHECK(list.has_more == 1);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL && strcmp(list.items[0].id, "key_1") == 0);
+    CHECK(list.items[0].name != NULL && strcmp(list.items[0].name, "prod") == 0);
+    CHECK(list.items[0].created_at != NULL &&
+          strcmp(list.items[0].created_at, "2023-10-06 23:47:56.678+00") == 0);
+    CHECK(list.items[0].last_used_at != NULL &&
+          strcmp(list.items[0].last_used_at, "2024-01-02 03:04:05.678+00") == 0);
+    CHECK(list.items[0].token == NULL);
+    CHECK(list.items[1].id != NULL && strcmp(list.items[1].id, "key_2") == 0);
+    CHECK(list.items[1].name != NULL && strcmp(list.items[1].name, "send") == 0);
+    CHECK(list.items[1].last_used_at == NULL);
+    CHECK(list.items[1].token == NULL);
+    resend_api_key_list_free(&list);
+    resend_api_key_list_free(&list);
+    resend_api_key_list_free(NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_page limited = {.before = "cursor-2", .limit = 5};
+    rc = resend_api_keys_list(client, &limited, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/api-keys?before=cursor-2&limit=5") == 0);
+    resend_api_key_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char empty_body[] = "{\"has_more\":false,\"data\":[]}";
+    fake_exchange empty_ex = {.status = 200, .body = empty_body};
+    f = fake_start(&empty_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_api_keys_list(client, NULL, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/api-keys") == 0);
+    CHECK(list.count == 0);
+    CHECK(list.has_more == 0);
+    CHECK(list.items == NULL);
+    resend_api_key_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"name\":\"prod\"}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"id\":\"k\",\"last_used_at\":1}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":null}"},
+        {.status = 404, .body = "{\"name\":\"not_found\",\"message\":\"API key not found\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 3; i++) {
+        memset(&list, 0x5a, sizeof list);
+        rc = resend_api_keys_list(client, NULL, &list);
+        CHECK(rc == -1);
+        CHECK(list.items == NULL);
+        CHECK(list.count == 0);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        resend_api_key_list_free(&list);
+    }
+    CHECK(resend_api_keys_list(client, NULL, &list) == 0);
+    CHECK(list.count == 0);
+    CHECK(list.has_more == 0);
+    resend_api_key_list_free(&list);
+    rc = resend_api_keys_list(client, NULL, &list);
+    CHECK(rc == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->message != NULL && strcmp(err->message, "API key not found") == 0);
+    resend_api_key_list_free(&list);
+    CHECK(fake_request_count(f) == (int)(sizeof bad / sizeof bad[0]));
+    resend_free(client);
+    fake_stop(f);
+}
+
+static void test_api_keys_remove(void) {
+    static const char id[] = "key_1";
+    fake_exchange ok = {
+        .status = 200,
+        .body = "{\"object\":\"api_key\",\"id\":\"key_1\",\"deleted\":true}",
+    };
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    CHECK(resend_api_keys_remove(NULL, id) == -1);
+    CHECK(resend_api_keys_remove(client, "") == -1);
+    CHECK(resend_api_keys_remove(client, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    int rc = resend_api_keys_remove(client, id);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "DELETE") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/api-keys/key_1") == 0);
+    CHECK(fake_body(f) == NULL || fake_body(f)[0] == '\0');
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_api_keys_remove(client, "a/b c\n?");
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/api-keys/a%2Fb%20c%0A%3F") == 0);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange missing = {
+        .status = 404,
+        .body = "{\"name\":\"not_found\",\"message\":\"API key not found\"}",
+    };
+    f = fake_start(&missing, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_api_keys_remove(client, id);
+    CHECK(rc == -1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "API key not found") == 0);
+    resend_free(client);
+    fake_stop(f);
+}
+
+static void test_api_keys_update(void) {
+    fake_exchange ok = {.status = 200, .body = "{\"object\":\"api_key\",\"id\":\"key_1\"}"};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    CHECK(resend_api_keys_update(NULL, "key_1", "n") == -1);
+    CHECK(resend_api_keys_update(client, NULL, "n") == -1);
+    CHECK(resend_api_keys_update(client, "", "n") == -1);
+    CHECK(resend_api_keys_update(client, "key_1", NULL) == -1);
+    CHECK(resend_api_keys_update(client, "key_1", "") == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    CHECK(resend_api_keys_update(client, "key_1", "Prod \"main\"") == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "PATCH") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/api-keys/key_1") == 0);
+    CHECK(body_eq(f, "{\"name\":\"Prod \\\"main\\\"\"}"));
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange missing = {
+        .status = 404,
+        .body = "{\"name\":\"not_found\",\"message\":\"API key not found\"}",
+    };
+    f = fake_start(&missing, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    CHECK(resend_api_keys_update(client, "key_1", "n") == -1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    resend_free(client);
+    fake_stop(f);
+}
+
 int main(void) {
     test_send();
     test_error_body();
@@ -2459,6 +3993,15 @@ int main(void) {
     test_receiving_list();
     test_receiving_attachments();
     test_download();
+    test_domains_get();
+    test_domains_list();
+    test_domains_create();
+    test_domains_update();
+    test_domains_verify_remove();
+    test_api_keys_create();
+    test_api_keys_list();
+    test_api_keys_update();
+    test_api_keys_remove();
     if (failures != 0) {
         fprintf(stderr, "%d failure%s\n", failures, failures == 1 ? "" : "s");
         return 1;
