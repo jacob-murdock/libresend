@@ -133,9 +133,13 @@ fail:
 }
 
 int resend_logs_list(resend *client, const resend_page *page, resend_log_list *out) {
-    if (!client || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
@@ -168,9 +172,17 @@ int resend_logs_list(resend *client, const resend_page *page, resend_log_list *o
 }
 
 int resend_logs_get(resend *client, const char *log_id, resend_log *out) {
-    if (!client || !log_id || !log_id[0] || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!log_id || !log_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;

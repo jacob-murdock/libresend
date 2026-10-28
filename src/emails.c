@@ -39,12 +39,12 @@ static int attachment_mode_ok(const resend_attachment *a) {
 static int reject_bad_attachments(resend *client, const resend_attachment *attachments,
                                   size_t count) {
     if (count > 0 && !attachments) {
-        resend_error_set(client, 0, NULL, "missing attachments");
+        resend_error_set(client, 0, "missing_required_field", "missing attachments");
         return -1;
     }
     for (size_t i = 0; i < count; i++) {
         if (!attachment_mode_ok(&attachments[i])) {
-            resend_error_set(client, 0, NULL, "attachment needs content or path, not both");
+            resend_error_set(client, 0, "validation_error", "attachment needs content or path, not both");
             return -1;
         }
     }
@@ -178,15 +178,23 @@ fail:
 }
 
 int resend_emails_send(resend *client, const resend_send *message, resend_sent *out) {
-    if (!client || !message || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!message) {
+        resend_error_set(client, 0, "missing_required_field", "missing request");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     out->id = NULL;
 
     if (reject_bad_attachments(client, message->attachments, message->attachment_count) != 0)
         return -1;
     if (message->idempotency_key && strlen(message->idempotency_key) > 256) {
-        resend_error_set(client, 0, NULL, "idempotency key longer than 256");
+        resend_error_set(client, 0, "validation_error", "idempotency key longer than 256");
         return -1;
     }
 
@@ -300,31 +308,39 @@ fail:
 }
 
 int resend_emails_send_batch(resend *client, const resend_batch *batch, resend_sent_list *out) {
-    if (!client || !batch || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!batch) {
+        resend_error_set(client, 0, "missing_required_field", "missing request");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     if (batch->count > 100) {
-        resend_error_set(client, 0, NULL, "batch count above 100");
+        resend_error_set(client, 0, "validation_error", "batch count above 100");
         return -1;
     }
     if (batch->count > 0 && !batch->messages) {
-        resend_error_set(client, 0, NULL, "missing batch messages");
+        resend_error_set(client, 0, "missing_required_field", "missing batch messages");
         return -1;
     }
     if (batch->idempotency_key && strlen(batch->idempotency_key) > 256) {
-        resend_error_set(client, 0, NULL, "idempotency key longer than 256");
+        resend_error_set(client, 0, "validation_error", "idempotency key longer than 256");
         return -1;
     }
     if (batch->validation && strcmp(batch->validation, "strict") != 0 &&
         strcmp(batch->validation, "permissive") != 0) {
-        resend_error_set(client, 0, NULL, "validation must be strict or permissive");
+        resend_error_set(client, 0, "validation_error", "validation must be strict or permissive");
         return -1;
     }
     for (size_t i = 0; i < batch->count; i++) {
         if (batch->messages[i].attachment_count > 0) {
-            resend_error_set(client, 0, NULL, "batch does not accept attachments");
+            resend_error_set(client, 0, "validation_error", "batch does not accept attachments");
             return -1;
         }
     }
@@ -410,9 +426,17 @@ static int parse_email(const char *json, size_t len, resend_email *out) {
 
 static int email_by_id(resend *client, const char *method, const char *email_id, const char *suffix,
                        resend_email *out) {
-    if (!client || !email_id || !email_id[0] || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!email_id || !email_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
@@ -529,12 +553,20 @@ int resend_emails_cancel(resend *client, const char *email_id, resend_email *out
  */
 int resend_emails_update(resend *client, const char *email_id, const char *scheduled_at,
                          resend_sent *out) {
-    if (!client || !email_id || !email_id[0] || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!email_id || !email_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     out->id = NULL;
     if (!scheduled_at || !scheduled_at[0]) {
-        resend_error_set(client, 0, NULL, "missing scheduled_at");
+        resend_error_set(client, 0, "missing_required_field", "missing scheduled_at");
         return -1;
     }
 
@@ -591,9 +623,13 @@ int resend_emails_attachment_get(resend *client, const char *email_id, const cha
 }
 
 int resend_emails_list(resend *client, const resend_page *page, resend_email_list *out) {
-    if (!client || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;

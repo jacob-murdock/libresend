@@ -145,21 +145,29 @@ fail:
 }
 
 int resend_api_keys_create(resend *client, const resend_api_key_create *key, resend_api_key *out) {
-    if (!client || !key || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!key) {
+        resend_error_set(client, 0, "missing_required_field", "missing request");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
     if (!key->name || !key->name[0]) {
-        resend_error_set(client, 0, NULL, "missing api key name");
+        resend_error_set(client, 0, "missing_required_field", "missing api key name");
         return -1;
     }
     if (key->permission && !permission_ok(key->permission)) {
-        resend_error_set(client, 0, NULL, "permission must be full_access or sending_access");
+        resend_error_set(client, 0, "validation_error", "permission must be full_access or sending_access");
         return -1;
     }
     if (key->domain_id && key->domain_id[0] &&
         (!key->permission || strcmp(key->permission, "sending_access") != 0)) {
-        resend_error_set(client, 0, NULL, "domain_id requires sending_access");
+        resend_error_set(client, 0, "validation_error", "domain_id requires sending_access");
         return -1;
     }
 
@@ -198,9 +206,13 @@ int resend_api_keys_create(resend *client, const resend_api_key_create *key, res
 }
 
 int resend_api_keys_list(resend *client, const resend_page *page, resend_api_key_list *out) {
-    if (!client || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
@@ -234,11 +246,15 @@ int resend_api_keys_list(resend *client, const resend_page *page, resend_api_key
 
 /* PATCH /api-keys/{id} with {"name": ...}. The response is only the id. */
 int resend_api_keys_update(resend *client, const char *api_key_id, const char *name) {
-    if (!client || !api_key_id || !api_key_id[0])
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!api_key_id || !api_key_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
     if (!name || !name[0]) {
-        resend_error_set(client, 0, NULL, "missing api key name");
+        resend_error_set(client, 0, "missing_required_field", "missing api key name");
         return -1;
     }
 
@@ -275,9 +291,13 @@ int resend_api_keys_update(resend *client, const char *api_key_id, const char *n
 }
 
 int resend_api_keys_remove(resend *client, const char *api_key_id) {
-    if (!client || !api_key_id || !api_key_id[0])
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!api_key_id || !api_key_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
 
     char *path = NULL;
     if (resend_path_with_id(client, "/api-keys/", api_key_id, NULL, &path) != 0)

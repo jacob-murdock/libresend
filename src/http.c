@@ -48,7 +48,7 @@ int resend_path_with_page(resend *client, const char *prefix, const resend_page 
     if (!client || !prefix)
         return -1;
     if (page && page->after && page->before) {
-        resend_error_set(client, 0, NULL, "after and before cannot be combined");
+        resend_error_set(client, 0, "validation_error", "after and before cannot be combined");
         return -1;
     }
 
@@ -132,7 +132,7 @@ int resend_path_with_id(resend *client, const char *prefix, const char *id, cons
     if (!client || !prefix || !id)
         return -1;
     if (is_dot_segment(id)) {
-        resend_error_set(client, 0, NULL, "id cannot be . or ..");
+        resend_error_set(client, 0, "validation_error", "id cannot be . or ..");
         return -1;
     }
 
@@ -284,19 +284,19 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
     memset(out, 0, sizeof *out);
     resend_buf_init(&out->body);
     if (!no_ctl(client->base_url)) {
-        resend_error_set(client, 0, NULL, "base url contains a control character");
+        resend_error_set(client, 0, "validation_error", "base url contains a control character");
         return -1;
     }
     if (!no_ctl(client->api_key)) {
-        resend_error_set(client, 0, NULL, "api key contains a control character");
+        resend_error_set(client, 0, "validation_error", "api key contains a control character");
         return -1;
     }
     if (!no_ctl(idempotency_key)) {
-        resend_error_set(client, 0, NULL, "idempotency key contains a control character");
+        resend_error_set(client, 0, "validation_error", "idempotency key contains a control character");
         return -1;
     }
     if (!no_ctl(batch_validation)) {
-        resend_error_set(client, 0, NULL, "batch validation contains a control character");
+        resend_error_set(client, 0, "validation_error", "batch validation contains a control character");
         return -1;
     }
 

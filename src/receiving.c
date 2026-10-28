@@ -376,9 +376,17 @@ static int receiving_get_ok(resend *client, char *path, size_t body_max,
 
 int resend_receiving_get(resend *client, const char *email_id, const char *html_format,
                          resend_received *out) {
-    if (!client || !email_id || !email_id[0] || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!email_id || !email_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     const char *suffix = NULL;
@@ -388,7 +396,7 @@ int resend_receiving_get(resend *client, const char *email_id, const char *html_
         else if (strcmp(html_format, "cid") == 0)
             suffix = "?html_format=cid";
         else {
-            resend_error_set(client, 0, NULL, "html_format must be data_uri or cid");
+            resend_error_set(client, 0, "validation_error", "html_format must be data_uri or cid");
             return -1;
         }
     }
@@ -413,9 +421,13 @@ int resend_receiving_get(resend *client, const char *email_id, const char *html_
 }
 
 int resend_receiving_list(resend *client, const resend_page *page, resend_received_list *out) {
-    if (!client || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
@@ -439,9 +451,17 @@ int resend_receiving_list(resend *client, const resend_page *page, resend_receiv
 
 int resend_attachments_list(resend *client, const char *prefix, const char *email_id,
                             const resend_page *page, resend_received_attachment_list *out) {
-    if (!client || !prefix || !email_id || !email_id[0] || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!prefix || !email_id || !email_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *base = NULL;
@@ -472,10 +492,17 @@ int resend_attachments_list(resend *client, const char *prefix, const char *emai
 
 int resend_attachment_get(resend *client, const char *prefix, const char *email_id,
                           const char *attachment_id, resend_received_attachment *out) {
-    if (!client || !prefix || !email_id || !email_id[0] || !attachment_id || !attachment_id[0] ||
-        !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!prefix || !email_id || !email_id[0] || !attachment_id || !attachment_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *built = NULL;

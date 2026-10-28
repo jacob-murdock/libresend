@@ -238,6 +238,107 @@ static void test_error_body(void) {
     fake_stop(f);
 }
 
+/*
+ * A bad argument must clear the previous API failure from the slot before
+ * rejecting. A NULL client has no slot. set_base_url also clears on success.
+ */
+static void test_error_clear_on_reject(void) {
+    static const char body[] = "{\"statusCode\":422,\"name\":\"validation_error\","
+                               "\"message\":\"Invalid `from` field\"}";
+    fake_exchange exchange = {.status = 422, .body = body};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+
+    char base[64];
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+
+    const char *const to[] = {"you@example.com"};
+    resend_send message = {
+        .from = "not-an-email",
+        .to = to,
+        .to_count = 1,
+        .subject = "Hello",
+        .text = "Hello from C.",
+    };
+    resend_sent sent = {0};
+    resend *client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    CHECK(resend_set_base_url(client, base) == 0);
+
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+
+    CHECK(resend_emails_send(NULL, &message, &sent) == -1);
+
+    CHECK(resend_emails_send(client, NULL, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->name != NULL && strcmp(err->name, "missing_required_field") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing request") == 0);
+    CHECK(fake_request_count(f) == 1);
+
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+
+    CHECK(resend_emails_update(client, "id", NULL, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->name != NULL && strcmp(err->name, "missing_required_field") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing scheduled_at") == 0);
+    CHECK(fake_request_count(f) == 2);
+
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+
+    resend_suppression s = {0};
+    CHECK(resend_suppressions_get(client, NULL, &s) == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->name != NULL && strcmp(err->name, "missing_required_field") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing id") == 0);
+    CHECK(fake_request_count(f) == 3);
+
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+
+    CHECK(resend_emails_list(client, NULL, NULL) == -1);
+    err = resend_last_error(client);
+    CHECK(err->name != NULL && strcmp(err->name, "missing_required_field") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing result") == 0);
+
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+
+    resend_received r = {0};
+    CHECK(resend_receiving_get(client, "id", "markdown", &r) == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+    CHECK(fake_request_count(f) == 5);
+
+    CHECK(resend_set_base_url(client, "http://127.0.0.1:1") == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->name == NULL);
+    CHECK(err->message != NULL && err->message[0] == '\0');
+
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+}
+
 /* Nothing listens on port 1; the call must fail before an HTTP status. */
 static void test_transport_failure(void) {
     const char *const to[] = {"you@example.com"};
@@ -5698,6 +5799,7 @@ int main(void) {
     test_send();
     test_set_base_url();
     test_error_body();
+    test_error_clear_on_reject();
     test_transport_failure();
     test_body_cap();
     test_redirect_follow();

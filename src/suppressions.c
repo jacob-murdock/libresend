@@ -120,12 +120,16 @@ static int write_string_array_object(resend_buf *body, const char *key, const ch
 }
 
 int resend_suppressions_add(resend *client, const char *email, resend_suppression *out) {
-    if (!client || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
     if (!email || !email[0]) {
-        resend_error_set(client, 0, NULL, "missing email");
+        resend_error_set(client, 0, "missing_required_field", "missing email");
         return -1;
     }
 
@@ -162,9 +166,13 @@ int resend_suppressions_add(resend *client, const char *email, resend_suppressio
 
 int resend_suppressions_list(resend *client, const resend_page *page, const char *origin,
                              resend_suppression_list *out) {
-    if (!client || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
@@ -202,9 +210,17 @@ int resend_suppressions_list(resend *client, const resend_page *page, const char
 
 static int suppression_by_id(resend *client, const char *method, const char *suppression,
                              resend_suppression *out) {
-    if (!client || !suppression || !suppression[0] || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!suppression || !suppression[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
@@ -246,20 +262,24 @@ int resend_suppressions_remove(resend *client, const char *suppression, resend_s
 
 int resend_suppressions_add_batch(resend *client, const char *const *emails, size_t count,
                                   resend_suppression_list *out) {
-    if (!client || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
     if (count == 0) {
-        resend_error_set(client, 0, NULL, "batch count below 1");
+        resend_error_set(client, 0, "validation_error", "batch count below 1");
         return -1;
     }
     if (count > 100) {
-        resend_error_set(client, 0, NULL, "batch count above 100");
+        resend_error_set(client, 0, "validation_error", "batch count above 100");
         return -1;
     }
     if (!emails) {
-        resend_error_set(client, 0, NULL, "missing batch emails");
+        resend_error_set(client, 0, "missing_required_field", "missing batch emails");
         return -1;
     }
 
@@ -296,19 +316,27 @@ int resend_suppressions_add_batch(resend *client, const char *const *emails, siz
 
 int resend_suppressions_remove_batch(resend *client, const resend_suppression_batch_remove *req,
                                      resend_suppression_list *out) {
-    if (!client || !req || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!req) {
+        resend_error_set(client, 0, "missing_required_field", "missing request");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     int have_emails = req->email_count > 0;
     int have_ids = req->id_count > 0;
     if (have_emails && have_ids) {
-        resend_error_set(client, 0, NULL, "emails and ids cannot be combined");
+        resend_error_set(client, 0, "validation_error", "emails and ids cannot be combined");
         return -1;
     }
     if (!have_emails && !have_ids) {
-        resend_error_set(client, 0, NULL, "missing batch emails or ids");
+        resend_error_set(client, 0, "missing_required_field", "missing batch emails or ids");
         return -1;
     }
 
@@ -328,11 +356,11 @@ int resend_suppressions_remove_batch(resend *client, const resend_suppression_ba
         missing = "missing batch ids";
     }
     if (count > 100) {
-        resend_error_set(client, 0, NULL, "batch count above 100");
+        resend_error_set(client, 0, "validation_error", "batch count above 100");
         return -1;
     }
     if (!items) {
-        resend_error_set(client, 0, NULL, missing);
+        resend_error_set(client, 0, "missing_required_field", missing);
         return -1;
     }
 

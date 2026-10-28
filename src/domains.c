@@ -180,9 +180,17 @@ static int parse_domain(const char *json, size_t len, resend_domain *out, int wi
 }
 
 int resend_domains_get(resend *client, const char *domain_id, resend_domain *out) {
-    if (!client || !domain_id || !domain_id[0] || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!domain_id || !domain_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
@@ -285,9 +293,13 @@ fail:
 }
 
 int resend_domains_list(resend *client, const resend_page *page, resend_domain_list *out) {
-    if (!client || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
@@ -377,12 +389,20 @@ fail:
 }
 
 int resend_domains_create(resend *client, const resend_domain_create *domain, resend_domain *out) {
-    if (!client || !domain || !out)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!domain) {
+        resend_error_set(client, 0, "missing_required_field", "missing request");
+        return -1;
+    }
+    if (!out) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
     memset(out, 0, sizeof *out);
     if (!domain->name || !domain->name[0]) {
-        resend_error_set(client, 0, NULL, "missing domain name");
+        resend_error_set(client, 0, "missing_required_field", "missing domain name");
         return -1;
     }
 
@@ -466,11 +486,19 @@ static int domain_method(resend *client, const char *method, const char *domain_
 }
 
 int resend_domains_update(resend *client, const char *domain_id, const resend_domain_update *domain) {
-    if (!client || !domain_id || !domain_id[0] || !domain)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!domain_id || !domain_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
+    if (!domain) {
+        resend_error_set(client, 0, "missing_required_field", "missing request");
+        return -1;
+    }
     if (update_is_empty(domain)) {
-        resend_error_set(client, 0, NULL, "domain update needs a field");
+        resend_error_set(client, 0, "validation_error", "domain update needs a field");
         return -1;
     }
 
@@ -485,15 +513,23 @@ int resend_domains_update(resend *client, const char *domain_id, const resend_do
 }
 
 int resend_domains_verify(resend *client, const char *domain_id) {
-    if (!client || !domain_id || !domain_id[0])
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!domain_id || !domain_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
     return domain_method(client, "POST", domain_id, "/verify", NULL);
 }
 
 int resend_domains_remove(resend *client, const char *domain_id) {
-    if (!client || !domain_id || !domain_id[0])
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!domain_id || !domain_id[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing id");
+        return -1;
+    }
     return domain_method(client, "DELETE", domain_id, NULL, NULL);
 }

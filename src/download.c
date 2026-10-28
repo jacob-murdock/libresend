@@ -53,16 +53,24 @@ int resend_download(resend *client, const char *https_url, void **out_bytes, siz
         *out_bytes = NULL;
     if (out_len)
         *out_len = 0;
-    if (!client || !https_url || !https_url[0] || !out_bytes || !out_len)
+    if (!client)
         return -1;
     resend_error_clear(client);
+    if (!https_url || !https_url[0]) {
+        resend_error_set(client, 0, "missing_required_field", "missing url");
+        return -1;
+    }
+    if (!out_bytes || !out_len) {
+        resend_error_set(client, 0, "missing_required_field", "missing result");
+        return -1;
+    }
 
     if (has_ctl(https_url)) {
-        resend_error_set(client, 0, NULL, "invalid download url");
+        resend_error_set(client, 0, "validation_error", "invalid download url");
         return -1;
     }
     if (!https_scheme(https_url)) {
-        resend_error_set(client, 0, NULL, "download url must be https");
+        resend_error_set(client, 0, "validation_error", "download url must be https");
         return -1;
     }
 
