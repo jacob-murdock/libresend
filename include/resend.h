@@ -49,7 +49,7 @@ typedef struct {
 
 RESEND_API resend *resend_init(const char *api_key);
 RESEND_API void resend_free(resend *client);
-/* Tests. Production calls api.resend.com. 0 stored the URL. */
+/* Tests. Production calls api.resend.com. Absolute http:// or https:// only. 0 stored the URL. */
 RESEND_API int resend_set_base_url(resend *client, const char *base_url);
 RESEND_API const resend_error *resend_last_error(const resend *client);
 

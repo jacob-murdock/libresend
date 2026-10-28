@@ -142,6 +142,25 @@ static void test_set_base_url(void) {
     err = resend_last_error(client);
     CHECK(err != NULL && err->message != NULL && strcmp(err->message, "base url is required") == 0);
 
+    CHECK(resend_set_base_url(client, "file:///etc/passwd") == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "base url must be http or https") == 0);
+
+    CHECK(resend_set_base_url(client, "gopher://127.0.0.1/1") == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "base url must be http or https") == 0);
+
+    CHECK(resend_set_base_url(client, "/") == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL && strcmp(err->message, "base url is required") == 0);
+
+    CHECK(resend_set_base_url(client, "///") == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL && strcmp(err->message, "base url is required") == 0);
+    CHECK(fake_request_count(f) == 0);
+
     const char *const to[] = {"you@example.com"};
     resend_send message = smoke_message(to);
     resend_sent sent = {0};
@@ -340,7 +359,66 @@ static void test_redirect_follow(void) {
     fake_stop(f);
 }
 
-/* Absolute http:// aimed at this fake. A follow would parse the id. */
+/*
+ * 127.0.0.1 and localhost are different hosts. libcurl strips the custom
+ * Authorization header on that hop unless CURLOPT_UNRESTRICTED_AUTH is set.
+ * A scheme-relative Location stays on HTTP, so the header callback that
+ * refuses an absolute http:// downgrade does not abort this follow.
+ */
+static void test_redirect_other_host(void) {
+    static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
+    char raw[64];
+    snprintf(raw, sizeof raw, "{\"id\":\"%s\"}", id);
+
+    fake_exchange dest_ex = {.status = 200, .body = raw};
+    fake *dest = fake_start(&dest_ex, 1);
+    CHECK(dest != NULL);
+    if (!dest)
+        return;
+
+    char location[64];
+    snprintf(location, sizeof location, "//localhost:%d/emails", fake_port(dest));
+
+    fake_exchange src_ex = {.status = 302, .body = "", .location = location};
+    fake *src = fake_start(&src_ex, 1);
+    CHECK(src != NULL);
+    if (!src) {
+        fake_stop(dest);
+        return;
+    }
+
+    char base[64];
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(src));
+
+    const char *const to[] = {"you@example.com"};
+    resend_send message = smoke_message(to);
+    resend_sent sent = {0};
+
+    resend *client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(src);
+        fake_stop(dest);
+        return;
+    }
+
+    CHECK(resend_set_base_url(client, base) == 0);
+    int rc = resend_emails_send(client, &message, &sent);
+    CHECK(rc == 0);
+    CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
+    CHECK(fake_request_count(src) == 1);
+    CHECK(header_eq(src, "Authorization", "Bearer re_test"));
+    CHECK(fake_request_count(dest) == 1);
+    CHECK(fake_header(dest, "Authorization") == NULL);
+
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(src);
+    fake_stop(dest);
+}
+
+/* Absolute http:// aimed at this fake. A follow would parse the id.
+ * The fake is plain HTTP; this is the https-to-http stand-in. */
 static void test_redirect_drop_http(void) {
     static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
     char raw[64];
@@ -5623,6 +5701,7 @@ int main(void) {
     test_transport_failure();
     test_body_cap();
     test_redirect_follow();
+    test_redirect_other_host();
     test_redirect_drop_http();
     test_location_on_success();
     test_location_on_error();

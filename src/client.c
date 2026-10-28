@@ -116,6 +116,15 @@ int resend_set_base_url(resend *client, const char *base_url) {
     size_t n = strlen(base_url);
     while (n > 0 && base_url[n - 1] == '/')
         n--;
+    if (n == 0) {
+        resend_error_set(client, 0, NULL, "base url is required");
+        return -1;
+    }
+    if (!((n >= 8 && resend_ascii_ncasecmp(base_url, "https://", 8) == 0) ||
+          (n >= 7 && resend_ascii_ncasecmp(base_url, "http://", 7) == 0))) {
+        resend_error_set(client, 0, NULL, "base url must be http or https");
+        return -1;
+    }
     char *copy = malloc(n + 1);
     if (!copy) {
         resend_error_set(client, 0, NULL, "out of memory");

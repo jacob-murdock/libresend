@@ -97,8 +97,7 @@ int resend_download(resend *client, const char *https_url, void **out_bytes, siz
     /* Abort if the transfer stays under 1 byte/s for 30s. No total deadline. */
     curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, (long)LIBRESEND_TIMEOUT_SEC);
-    if (curl_easy_setopt(easy, CURLOPT_PROTOCOLS_STR, "https") != CURLE_OK ||
-        curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "https") != CURLE_OK ||
+    if (resend_curl_set_protocols(easy, 1) != 0 ||
         curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L) != CURLE_OK ||
         curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L) != CURLE_OK) {
         curl_slist_free_all(headers);

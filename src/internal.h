@@ -103,6 +103,12 @@ int resend_http_json(resend *client, const char *method, const char *path, const
 int resend_http_json_limit(resend *client, const char *method, const char *path, const char *body,
                            const char *idempotency_key, const char *batch_validation,
                            size_t body_max, resend_http_response *out);
+/*
+ * Restrict easy to HTTP and HTTPS, or HTTPS only. Tries CURLOPT_PROTOCOLS_STR
+ * first. CURLE_UNKNOWN_OPTION (libcurl before 7.85) falls back to the
+ * CURLOPT_PROTOCOLS bitmask. Any other failure is -1.
+ */
+int resend_curl_set_protocols(void *easy, int https_only);
 
 /*
  * prefix is "/emails/" or "/emails/receiving/". List and get fill download_url

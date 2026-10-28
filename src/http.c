@@ -203,10 +203,11 @@ static int http_status_line(const char *buf, size_t n) {
     return (buf[i] - '0') * 100 + (buf[i + 1] - '0') * 10 + (buf[i + 2] - '0');
 }
 
-/* Absolute http:// on a 3xx is a drop off HTTPS (and refused on HTTP too).
- * A Location on any other status is not a redirect: aborting would drop a
- * response the server already produced. Relative and https:// targets are
- * followed. */
+/* Absolute http:// on a 3xx is a drop off HTTPS (and refused on HTTP too),
+ * so a same-host hop never sends the key in clear. CURLOPT_UNRESTRICTED_AUTH
+ * is never set: a follow to another host drops Authorization. A Location on
+ * any other status is not a redirect: aborting would drop a response the
+ * server already produced. Relative and https:// targets are followed. */
 static size_t header_cb(char *buf, size_t size, size_t nitems, void *userdata) {
     struct header_ctx *ctx = userdata;
     size_t n = size * nitems;
@@ -228,6 +229,33 @@ static size_t header_cb(char *buf, size_t size, size_t nitems, void *userdata) {
         }
     }
     return n;
+}
+
+#ifndef CURL_IGNORE_DEPRECATION
+#define CURL_IGNORE_DEPRECATION(statements) statements
+#endif
+
+int resend_curl_set_protocols(void *easy, int https_only) {
+    CURL *c = easy;
+    const char *str = https_only ? "https" : "http,https";
+    long mask = https_only ? CURLPROTO_HTTPS : (CURLPROTO_HTTP | CURLPROTO_HTTPS);
+
+#if LIBCURL_VERSION_NUM >= 0x075500
+    CURLcode rc = curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, str);
+    if (rc == CURLE_OK)
+        rc = curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, str);
+    if (rc == CURLE_OK)
+        return 0;
+    if (rc != CURLE_UNKNOWN_OPTION)
+        return -1;
+#endif
+
+    CURLcode brc = CURLE_OK;
+    CURL_IGNORE_DEPRECATION(brc = curl_easy_setopt(c, CURLOPT_PROTOCOLS, mask);)
+    if (brc != CURLE_OK)
+        return -1;
+    CURL_IGNORE_DEPRECATION(brc = curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, mask);)
+    return brc == CURLE_OK ? 0 : -1;
 }
 
 /* Curl copies CR and LF from these strings into the request. */
@@ -362,8 +390,13 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
     curl_easy_setopt(easy, CURLOPT_HEADERDATA, &hctx);
     curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 10L);
-    curl_easy_setopt(easy, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+    if (resend_curl_set_protocols(easy, 0) != 0) {
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(easy);
+        free(url);
+        resend_error_set(client, 0, NULL, "curl setup failed");
+        return -1;
+    }
     curl_easy_setopt(easy, CURLOPT_TIMEOUT, (long)LIBRESEND_TIMEOUT_SEC);
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, (long)LIBRESEND_CONNECT_TIMEOUT_SEC);
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
