@@ -1039,7 +1039,8 @@ static void test_send_idempotency_key_max(void) {
     fake_stop(f);
 }
 
-/* GET /emails/{id} fills resend_email, including message_id and last_event. */
+/* GET /emails/{id} fills resend_email, including scheduled_at and tags.
+ * JSON null scheduled_at stays NULL. */
 static void test_emails_get(void) {
     static const char body[] =
         "{\"object\":\"email\","
@@ -1105,7 +1106,138 @@ static void test_emails_get(void) {
     CHECK(email.created_at != NULL &&
           strcmp(email.created_at, "2026-04-03 22:13:42.674981+00") == 0);
     CHECK(email.last_event != NULL && strcmp(email.last_event, "delivered") == 0);
+    CHECK(email.scheduled_at == NULL);
+    CHECK(email.tag_count == 1);
+    CHECK(email.tags != NULL && email.tags[0].name != NULL &&
+          strcmp(email.tags[0].name, "category") == 0);
+    CHECK(email.tags != NULL && email.tags[0].value != NULL &&
+          strcmp(email.tags[0].value, "confirm_email") == 0);
 
+    resend_email_free(&email);
+    CHECK(email.tags == NULL);
+    CHECK(email.tag_count == 0);
+    CHECK(email.scheduled_at == NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char scheduled[] =
+        "{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\","
+        "\"last_event\":\"scheduled\","
+        "\"scheduled_at\":\"2026-04-04 22:13:42+00\","
+        "\"tags\":[{\"name\":\"campaign\",\"value\":\"welcome\"},"
+        "{\"name\":\"priority\",\"value\":\"high\"}]}";
+    fake_exchange later = {.status = 200, .body = scheduled};
+    f = fake_start(&later, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+    client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    CHECK(resend_set_base_url(client, base) == 0);
+    rc = resend_emails_get(client, "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794", &email);
+    CHECK(rc == 0);
+    CHECK(email.scheduled_at != NULL &&
+          strcmp(email.scheduled_at, "2026-04-04 22:13:42+00") == 0);
+    CHECK(email.last_event != NULL && strcmp(email.last_event, "scheduled") == 0);
+    CHECK(email.tag_count == 2);
+    CHECK(email.tags != NULL && email.tags[0].name != NULL &&
+          strcmp(email.tags[0].name, "campaign") == 0);
+    CHECK(email.tags != NULL && email.tags[0].value != NULL &&
+          strcmp(email.tags[0].value, "welcome") == 0);
+    CHECK(email.tags != NULL && email.tags[1].name != NULL &&
+          strcmp(email.tags[1].name, "priority") == 0);
+    CHECK(email.tags != NULL && email.tags[1].value != NULL &&
+          strcmp(email.tags[1].value, "high") == 0);
+    resend_email_free(&email);
+    resend_free(client);
+    fake_stop(f);
+
+    /* Five tags force the array past the initial capacity of four. */
+    static const char five_tags[] =
+        "{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\","
+        "\"tags\":["
+        "{\"name\":\"a\",\"value\":\"1\"},"
+        "{\"name\":\"b\",\"value\":\"2\"},"
+        "{\"name\":\"c\",\"value\":\"3\"},"
+        "{\"name\":\"d\",\"value\":\"4\"},"
+        "{\"name\":\"e\",\"value\":\"5\"}]}";
+    fake_exchange five = {.status = 200, .body = five_tags};
+    f = fake_start(&five, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+    client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    CHECK(resend_set_base_url(client, base) == 0);
+    rc = resend_emails_get(client, "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794", &email);
+    CHECK(rc == 0);
+    CHECK(email.tag_count == 5);
+    CHECK(email.tags != NULL && email.tags[0].name != NULL &&
+          strcmp(email.tags[0].name, "a") == 0);
+    CHECK(email.tags != NULL && email.tags[0].value != NULL &&
+          strcmp(email.tags[0].value, "1") == 0);
+    CHECK(email.tags != NULL && email.tags[4].name != NULL &&
+          strcmp(email.tags[4].name, "e") == 0);
+    CHECK(email.tags != NULL && email.tags[4].value != NULL &&
+          strcmp(email.tags[4].value, "5") == 0);
+    resend_email_free(&email);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char empty_tags[] =
+        "{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\","
+        "\"scheduled_at\":null,\"tags\":[]}";
+    fake_exchange empty = {.status = 200, .body = empty_tags};
+    f = fake_start(&empty, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+    client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    CHECK(resend_set_base_url(client, base) == 0);
+    rc = resend_emails_get(client, "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794", &email);
+    CHECK(rc == 0);
+    CHECK(email.scheduled_at == NULL);
+    CHECK(email.tags == NULL);
+    CHECK(email.tag_count == 0);
+    resend_email_free(&email);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char null_tags[] =
+        "{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\",\"tags\":null}";
+    fake_exchange null_ex = {.status = 200, .body = null_tags};
+    f = fake_start(&null_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+    client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    CHECK(resend_set_base_url(client, base) == 0);
+    rc = resend_emails_get(client, "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794", &email);
+    CHECK(rc == 0);
+    CHECK(email.tags == NULL);
+    CHECK(email.tag_count == 0);
     resend_email_free(&email);
     resend_free(client);
     fake_stop(f);
@@ -1122,7 +1254,8 @@ static void test_emails_list(void) {
         "\"created_at\":\"2026-04-03 22:13:42.674981+00\","
         "\"subject\":\"Hello World\","
         "\"bcc\":null,\"cc\":null,\"reply_to\":null,"
-        "\"last_event\":\"delivered\"},"
+        "\"last_event\":\"delivered\","
+        "\"scheduled_at\":\"2026-04-04 22:13:42+00\"},"
         "{\"id\":\"3a9f8c2b-1e5d-4f8a-9c7b-2d6e5f8a9c7b\","
         "\"message_id\":\"<444-555-666@email.example.com>\","
         "\"to\":[\"user@example.com\"],"
@@ -1130,7 +1263,8 @@ static void test_emails_list(void) {
         "\"created_at\":\"2026-04-03 21:45:12.345678+00\","
         "\"subject\":\"Welcome to Acme\","
         "\"bcc\":null,\"cc\":null,\"reply_to\":null,"
-        "\"last_event\":\"opened\"}]}";
+        "\"last_event\":\"opened\","
+        "\"scheduled_at\":null}]}";
 
     fake_exchange exchange = {
         .status = 200,
@@ -1177,9 +1311,16 @@ static void test_emails_list(void) {
     CHECK(list.items[0].html == NULL);
     CHECK(list.items[0].text == NULL);
     CHECK(list.items[0].bcc_count == 0);
+    CHECK(list.items[0].scheduled_at != NULL &&
+          strcmp(list.items[0].scheduled_at, "2026-04-04 22:13:42+00") == 0);
+    CHECK(list.items[0].tags == NULL);
+    CHECK(list.items[0].tag_count == 0);
     CHECK(list.items[1].id != NULL &&
           strcmp(list.items[1].id, "3a9f8c2b-1e5d-4f8a-9c7b-2d6e5f8a9c7b") == 0);
     CHECK(list.items[1].last_event != NULL && strcmp(list.items[1].last_event, "opened") == 0);
+    CHECK(list.items[1].scheduled_at == NULL);
+    CHECK(list.items[1].tags == NULL);
+    CHECK(list.items[1].tag_count == 0);
 
     resend_email_list_free(&list);
     resend_free(client);
@@ -2133,6 +2274,12 @@ static void test_emails_get_bad(void) {
         {.status = 200, .body = "{\"id\":\"x\",\"html\":truefoo}"},
         /* Form feed is isspace in C, not JSON whitespace. */
         {.status = 200, .body = "{\f\"id\":\"x\"}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"scheduled_at\":false}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"tags\":true}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"tags\":[{\"name\":1}]}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"tags\":[1]}"},
+        {.status = 200,
+         .body = "{\"id\":\"x\",\"tags\":[{\"name\":\"ok\",\"value\":\"1\"},{\"name\":1}]}"},
     };
     fake *f = fake_start(script, sizeof script / sizeof script[0]);
     CHECK(f != NULL);

@@ -498,6 +498,16 @@ static void free_owned_strings(char **items, size_t count) {
     free(items);
 }
 
+static void free_tags(resend_header *items, size_t count) {
+    if (!items)
+        return;
+    for (size_t i = 0; i < count; i++) {
+        free(items[i].name);
+        free(items[i].value);
+    }
+    free(items);
+}
+
 void resend_email_free(resend_email *email) {
     if (!email)
         return;
@@ -513,7 +523,75 @@ void resend_email_free(resend_email *email) {
     free(email->text);
     free(email->created_at);
     free(email->last_event);
+    free(email->scheduled_at);
+    free_tags(email->tags, email->tag_count);
     memset(email, 0, sizeof *email);
+}
+
+static int parse_tag(const char *json, size_t len, resend_header *out) {
+    memset(out, 0, sizeof *out);
+    if (resend_json_opt_string(json, len, "name", &out->name) != 0 ||
+        resend_json_opt_string(json, len, "value", &out->value) != 0) {
+        free(out->name);
+        free(out->value);
+        memset(out, 0, sizeof *out);
+        return -1;
+    }
+    return 0;
+}
+
+static int parse_tags(const char *json, size_t len, resend_header **out, size_t *count) {
+    *out = NULL;
+    *count = 0;
+    const char *val = NULL;
+    const char *val_end = NULL;
+    int st = resend_json_member(json, len, "tags", &val, &val_end);
+    if (st < 0)
+        return -1;
+    if (st > 0)
+        return 0;
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
+        return 0;
+    if (val >= val_end || *val != '[')
+        return -1;
+
+    const char *p = val + 1;
+    resend_header *items = NULL;
+    size_t n = 0;
+    size_t cap = 0;
+    for (;;) {
+        p = resend_json_skip_ws(p, val_end);
+        if (p < val_end && *p == ']')
+            break;
+        if (p >= val_end || *p != '{')
+            goto fail;
+        const char *obj = p;
+        if (resend_json_skip_value(p, val_end, &p) != 0)
+            goto fail;
+        if (n == cap) {
+            size_t ncap = cap ? cap * 2 : 4;
+            resend_header *ni = realloc(items, ncap * sizeof *ni);
+            if (!ni)
+                goto fail;
+            items = ni;
+            cap = ncap;
+        }
+        if (parse_tag(obj, (size_t)(p - obj), &items[n]) != 0)
+            goto fail;
+        n++;
+        int step = resend_json_array_step(&p, val_end);
+        if (step < 0)
+            goto fail;
+        if (step == 0)
+            break;
+    }
+    *out = items;
+    *count = n;
+    return 0;
+fail:
+    free_tags(items, n);
+    return -1;
 }
 
 static int parse_email(const char *json, size_t len, resend_email *out) {
@@ -526,11 +604,12 @@ static int parse_email(const char *json, size_t len, resend_email *out) {
         resend_json_opt_string(json, len, "text", &out->text) != 0 ||
         resend_json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
         resend_json_opt_string(json, len, "last_event", &out->last_event) != 0 ||
+        resend_json_opt_string(json, len, "scheduled_at", &out->scheduled_at) != 0 ||
         resend_json_opt_string_array(json, len, "to", &out->to, &out->to_count) != 0 ||
         resend_json_opt_string_array(json, len, "cc", &out->cc, &out->cc_count) != 0 ||
         resend_json_opt_string_array(json, len, "bcc", &out->bcc, &out->bcc_count) != 0 ||
         resend_json_opt_string_array(json, len, "reply_to", &out->reply_to, &out->reply_to_count) != 0 ||
-        !out->id) {
+        parse_tags(json, len, &out->tags, &out->tag_count) != 0 || !out->id) {
         resend_email_free(out);
         return -1;
     }

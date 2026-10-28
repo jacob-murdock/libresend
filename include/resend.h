@@ -60,6 +60,13 @@ typedef struct {
     const char *value;
 } resend_pair;
 
+/* Owned name/value. Received headers, and tags on a sent email.
+ * A name or value is NULL when the API omits it. */
+typedef struct {
+    char *name;
+    char *value;
+} resend_header;
+
 typedef struct {
     const char *after;  /* NULL omits. Cannot be combined with before. */
     const char *before;
@@ -166,6 +173,9 @@ typedef struct {
     char *text;
     char *created_at;
     char *last_event;
+    char *scheduled_at; /* NULL when omitted or JSON null */
+    resend_header *tags; /* NULL on list when absent */
+    size_t tag_count;
 } resend_email;
 
 typedef struct {
@@ -209,11 +219,6 @@ typedef struct {
     char *dkim;
     char *dmarc;
 } resend_authentication;
-
-typedef struct {
-    char *name;
-    char *value;
-} resend_header;
 
 /* raw on a received email. Both NULL when the API omitted it, and on list. */
 typedef struct {

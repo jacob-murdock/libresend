@@ -100,8 +100,9 @@ int main(void)
         else
             fprintf(stderr, "last_event=%s\n", email.last_event ? email.last_event : "");
     } else {
-        printf("Get: id=%s last_event=%s\n", email.id,
-               email.last_event ? email.last_event : "");
+        printf("Get: id=%s last_event=%s scheduled_at=%s\n", email.id,
+               email.last_event ? email.last_event : "",
+               email.scheduled_at ? email.scheduled_at : "");
     }
     resend_email_free(&email);
 
