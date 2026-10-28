@@ -1581,10 +1581,68 @@ static void test_emails_update(void) {
     fake_stop(f);
 }
 
+/* Several errors grow the array; null errors is none; a malformed errors fails and frees. */
+static void test_emails_batch_errors(void) {
+    static const char many[] =
+        "{\"data\":[{\"id\":\"a\"}],\"errors\":["
+        "{\"index\":1,\"message\":\"e1\"},{\"index\":2,\"message\":\"e2\"},"
+        "{\"index\":3,\"message\":\"e3\"},{\"index\":4,\"message\":\"e4\"},"
+        "{\"index\":5,\"message\":\"e5\"}]}";
+    static const char null_errors[] = "{\"data\":[{\"id\":\"a\"}],\"errors\":null}";
+    static const char not_array[] = "{\"data\":[{\"id\":\"a\"}],\"errors\":{}}";
+    static const char null_index[] =
+        "{\"data\":[{\"id\":\"a\"}],\"errors\":[{\"index\":null,\"message\":\"e\"}]}";
+    static const char no_message[] = "{\"data\":[{\"id\":\"a\"}],\"errors\":[{\"index\":0}]}";
+    fake_exchange exchanges[] = {
+        {.status = 200, .body = many},
+        {.status = 200, .body = null_errors},
+        {.status = 200, .body = not_array},
+        {.status = 200, .body = null_index},
+        {.status = 200, .body = no_message},
+    };
+    fake *f = fake_start(exchanges, 5);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    const char *const to[] = {"one@example.com"};
+    resend_send message = smoke_message(to);
+    resend_batch batch = {.messages = &message, .count = 1, .validation = "permissive"};
+    resend_sent_list sent = {0};
+
+    CHECK(resend_emails_send_batch(client, &batch, &sent) == 0);
+    CHECK(sent.count == 1 && sent.error_count == 5);
+    for (size_t i = 0; sent.errors && i < sent.error_count; i++) {
+        char want[32];
+        snprintf(want, sizeof want, "e%zu", i + 1);
+        CHECK(sent.errors[i].index == i + 1 && sent.errors[i].message != NULL &&
+              strcmp(sent.errors[i].message, want) == 0);
+    }
+    resend_sent_list_free(&sent);
+
+    CHECK(resend_emails_send_batch(client, &batch, &sent) == 0);
+    CHECK(sent.count == 1 && sent.errors == NULL && sent.error_count == 0);
+    resend_sent_list_free(&sent);
+
+    for (int i = 0; i < 3; i++) {
+        CHECK(resend_emails_send_batch(client, &batch, &sent) == -1);
+        CHECK(sent.items == NULL && sent.count == 0);
+        CHECK(sent.errors == NULL && sent.error_count == 0);
+    }
+    CHECK(fake_request_count(f) == 5);
+    resend_free(client);
+    fake_stop(f);
+}
+
 /*
  * validation is strict or permissive, sent as x-batch-validation.
  * NULL omits the header. Any other value is rejected with no request.
- * A permissive body may include errors; those fields are ignored.
+ * A permissive 2xx may include errors; those are returned with the ids.
  */
 static void test_emails_batch_validation(void) {
     static const char permissive_body[] =
@@ -1623,6 +1681,34 @@ static void test_emails_batch_validation(void) {
     CHECK(sent.count == 1);
     CHECK(sent.items != NULL && sent.items[0].id != NULL &&
           strcmp(sent.items[0].id, "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794") == 0);
+    CHECK(sent.error_count == 1);
+    CHECK(sent.errors != NULL && sent.errors[0].index == 1 && sent.errors[0].message != NULL &&
+          strcmp(sent.errors[0].message, "Invalid email") == 0);
+    resend_sent_list_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char empty_data_body[] =
+        "{\"data\":[],\"errors\":[{\"index\":0,\"message\":\"Invalid email\"}]}";
+    fake_exchange empty_data = {.status = 200, .body = empty_data_body};
+    f = fake_start(&empty_data, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    memset(&sent, 0, sizeof sent);
+    rc = resend_emails_send_batch(client, &batch, &sent);
+    CHECK(rc == 0);
+    CHECK(sent.count == 0);
+    CHECK(sent.items == NULL);
+    CHECK(sent.error_count == 1);
+    CHECK(sent.errors != NULL && sent.errors[0].index == 0 && sent.errors[0].message != NULL &&
+          strcmp(sent.errors[0].message, "Invalid email") == 0);
     resend_sent_list_free(&sent);
     resend_free(client);
     fake_stop(f);
@@ -1648,6 +1734,8 @@ static void test_emails_batch_validation(void) {
     CHECK(header_eq(f, "x-batch-validation", "strict"));
     CHECK(fake_header(f, "Idempotency-Key") == NULL);
     CHECK(sent.count == 1);
+    CHECK(sent.errors == NULL);
+    CHECK(sent.error_count == 0);
     resend_sent_list_free(&sent);
 
     const char *bad_modes[] = {"", "Strict", "loose", "permissive\r\nX-Injected: yes"};
@@ -1658,6 +1746,8 @@ static void test_emails_batch_validation(void) {
         CHECK(rc == -1);
         CHECK(sent.items == NULL);
         CHECK(sent.count == 0);
+        CHECK(sent.errors == NULL);
+        CHECK(sent.error_count == 0);
         const resend_error *err = resend_last_error(client);
         CHECK(err != NULL && err->status == 0);
         CHECK(err->message != NULL &&
@@ -5892,6 +5982,7 @@ int main(void) {
     test_emails_update();
     test_emails_send_batch();
     test_emails_batch_validation();
+    test_emails_batch_errors();
     test_emails_attachments();
     test_emails_id_path();
     test_emails_list_query();

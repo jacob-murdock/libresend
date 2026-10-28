@@ -133,8 +133,20 @@ typedef struct {
 } resend_batch;
 
 typedef struct {
+    size_t index; /* position of the failed message in the request */
+    char *message;
+} resend_sent_error;
+
+/*
+ * Batch send result. items are accepted ids only. A permissive 2xx may also
+ * fill errors (including when data is empty); that still returns 0. Strict
+ * validation failures are non-2xx.
+ */
+typedef struct {
     resend_sent *items;
     size_t count;
+    resend_sent_error *errors;
+    size_t error_count;
 } resend_sent_list;
 
 typedef struct {

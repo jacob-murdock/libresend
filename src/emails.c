@@ -2,6 +2,7 @@
 
 #include <limits.h>
 #include <openssl/evp.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -272,7 +273,84 @@ void resend_sent_list_free(resend_sent_list *list) {
             resend_sent_free(&list->items[i]);
         free(list->items);
     }
+    if (list->errors) {
+        for (size_t i = 0; i < list->error_count; i++)
+            free(list->errors[i].message);
+        free(list->errors);
+    }
     memset(list, 0, sizeof *list);
+}
+
+static int parse_sent_errors(const char *json, size_t len, resend_sent_error **out, size_t *count) {
+    *out = NULL;
+    *count = 0;
+    const char *val = NULL;
+    const char *val_end = NULL;
+    int st = resend_json_member(json, len, "errors", &val, &val_end);
+    if (st < 0)
+        return -1;
+    if (st > 0)
+        return 0;
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
+        return 0;
+    if (val >= val_end || *val != '[')
+        return -1;
+
+    const char *p = val + 1;
+    resend_sent_error *errors = NULL;
+    size_t n = 0;
+    size_t cap = 0;
+    for (;;) {
+        p = resend_json_skip_ws(p, val_end);
+        if (p < val_end && *p == ']')
+            break;
+        if (p >= val_end || *p != '{')
+            goto fail;
+        const char *obj = p;
+        if (resend_json_skip_value(p, val_end, &p) != 0)
+            goto fail;
+        size_t olen = (size_t)(p - obj);
+        const char *ival = NULL;
+        const char *iend = NULL;
+        int64_t idx = 0;
+        if (resend_json_member(obj, olen, "index", &ival, &iend) != 0 ||
+            resend_json_is_null(resend_json_skip_ws(ival, iend), iend) ||
+            resend_json_opt_i64(obj, olen, "index", &idx) != 0 || idx < 0 ||
+            (uint64_t)idx > SIZE_MAX)
+            goto fail;
+        char *message = NULL;
+        if (resend_json_get_string(obj, olen, "message", &message) != 0 || !message)
+            goto fail;
+        if (n == cap) {
+            size_t ncap = cap ? cap * 2 : 4;
+            resend_sent_error *ne = realloc(errors, ncap * sizeof *ne);
+            if (!ne) {
+                free(message);
+                goto fail;
+            }
+            errors = ne;
+            cap = ncap;
+        }
+        errors[n].index = (size_t)idx;
+        errors[n].message = message;
+        n++;
+        int step = resend_json_array_step(&p, val_end);
+        if (step < 0)
+            goto fail;
+        if (step == 0)
+            break;
+    }
+    *out = errors;
+    *count = n;
+    return 0;
+fail:
+    if (errors) {
+        for (size_t i = 0; i < n; i++)
+            free(errors[i].message);
+        free(errors);
+    }
+    return -1;
 }
 
 static int parse_sent_list(const char *json, size_t len, resend_sent_list *out) {
@@ -321,8 +399,16 @@ static int parse_sent_list(const char *json, size_t len, resend_sent_list *out) 
         if (step == 0)
             break;
     }
+
+    resend_sent_error *errors = NULL;
+    size_t error_count = 0;
+    if (parse_sent_errors(json, len, &errors, &error_count) != 0)
+        goto fail;
+
     out->items = items;
     out->count = n;
+    out->errors = errors;
+    out->error_count = error_count;
     return 0;
 fail:
     {
