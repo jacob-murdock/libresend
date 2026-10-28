@@ -95,14 +95,14 @@ typedef struct {
 
 static int take_header(const char *key, const char *val, const char *val_end, void *ctx) {
     header_acc *acc = ctx;
-    val = json_skip_ws(val, val_end);
+    val = resend_json_skip_ws(val, val_end);
     if (val >= val_end || *val != '"')
         return -1;
     char *value = NULL;
     const char *next = NULL;
-    if (json_parse_string(val, val_end, &value, &next) != 0)
+    if (resend_json_parse_string(val, val_end, &value, &next) != 0)
         return -1;
-    if (json_skip_ws(next, val_end) != val_end) {
+    if (resend_json_skip_ws(next, val_end) != val_end) {
         free(value);
         return -1;
     }
@@ -132,11 +132,11 @@ static int take_header(const char *key, const char *val, const char *val_end, vo
 static int object_member(const char *json, size_t len, const char *key, const char **val,
                          size_t *n) {
     const char *end = NULL;
-    int st = json_member(json, len, key, val, &end);
+    int st = resend_json_member(json, len, key, val, &end);
     if (st != 0)
         return st;
-    const char *p = json_skip_ws(*val, end);
-    if (json_is_null(p, end))
+    const char *p = resend_json_skip_ws(*val, end);
+    if (resend_json_is_null(p, end))
         return 1;
     if (p >= end || *p != '{')
         return -1;
@@ -152,7 +152,7 @@ static int parse_headers(const char *json, size_t len, resend_received *out) {
     if (st != 0)
         return st < 0 ? -1 : 0;
     header_acc acc = {0};
-    if (json_each_member(val, n, take_header, &acc) != 0) {
+    if (resend_json_each_member(val, n, take_header, &acc) != 0) {
         free_headers(acc.items, acc.n);
         return -1;
     }
@@ -167,9 +167,9 @@ static int parse_authentication(const char *json, size_t len, resend_authenticat
     int st = object_member(json, len, "authentication", &val, &n);
     if (st != 0)
         return st < 0 ? -1 : 0;
-    if (json_opt_string(val, n, "spf", &out->spf) != 0 ||
-        json_opt_string(val, n, "dkim", &out->dkim) != 0 ||
-        json_opt_string(val, n, "dmarc", &out->dmarc) != 0)
+    if (resend_json_opt_string(val, n, "spf", &out->spf) != 0 ||
+        resend_json_opt_string(val, n, "dkim", &out->dkim) != 0 ||
+        resend_json_opt_string(val, n, "dmarc", &out->dmarc) != 0)
         return -1;
     return 0;
 }
@@ -180,8 +180,8 @@ static int parse_raw(const char *json, size_t len, resend_raw *out) {
     int st = object_member(json, len, "raw", &val, &n);
     if (st != 0)
         return st < 0 ? -1 : 0;
-    if (json_opt_string(val, n, "download_url", &out->download_url) != 0 ||
-        json_opt_string(val, n, "expires_at", &out->expires_at) != 0)
+    if (resend_json_opt_string(val, n, "download_url", &out->download_url) != 0 ||
+        resend_json_opt_string(val, n, "expires_at", &out->expires_at) != 0)
         return -1;
     return 0;
 }
@@ -193,18 +193,18 @@ static int parse_raw(const char *json, size_t len, resend_raw *out) {
 static int parse_attachment(const char *json, size_t len, resend_received_attachment *out,
                             int with_urls) {
     memset(out, 0, sizeof *out);
-    if (json_opt_string(json, len, "id", &out->id) != 0 ||
-        json_opt_string(json, len, "filename", &out->filename) != 0 ||
-        json_opt_string(json, len, "content_type", &out->content_type) != 0 ||
-        json_opt_string(json, len, "content_disposition", &out->content_disposition) != 0 ||
-        json_opt_string(json, len, "content_id", &out->content_id) != 0 ||
-        json_opt_i64(json, len, "size", &out->size) != 0 || !out->id) {
+    if (resend_json_opt_string(json, len, "id", &out->id) != 0 ||
+        resend_json_opt_string(json, len, "filename", &out->filename) != 0 ||
+        resend_json_opt_string(json, len, "content_type", &out->content_type) != 0 ||
+        resend_json_opt_string(json, len, "content_disposition", &out->content_disposition) != 0 ||
+        resend_json_opt_string(json, len, "content_id", &out->content_id) != 0 ||
+        resend_json_opt_i64(json, len, "size", &out->size) != 0 || !out->id) {
         resend_received_attachment_free(out);
         return -1;
     }
     if (with_urls) {
-        if (json_opt_string(json, len, "download_url", &out->download_url) != 0 ||
-            json_opt_string(json, len, "expires_at", &out->expires_at) != 0) {
+        if (resend_json_opt_string(json, len, "download_url", &out->download_url) != 0 ||
+            resend_json_opt_string(json, len, "expires_at", &out->expires_at) != 0) {
             resend_received_attachment_free(out);
             return -1;
         }
@@ -223,13 +223,13 @@ static int parse_object_array(const char *json, size_t len, const char *key, siz
     *count = 0;
     const char *val = NULL;
     const char *val_end = NULL;
-    int found = json_member(json, len, key, &val, &val_end);
+    int found = resend_json_member(json, len, key, &val, &val_end);
     if (found < 0)
         return -1;
     if (found > 0)
         return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
         return 0;
     if (val >= val_end || *val != '[')
         return -1;
@@ -239,13 +239,13 @@ static int parse_object_array(const char *json, size_t len, const char *key, siz
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
-        p = json_skip_ws(p, val_end);
+        p = resend_json_skip_ws(p, val_end);
         if (p < val_end && *p == ']')
             break;
         if (p >= val_end || *p != '{')
             goto fail;
         const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0 || p == obj)
+        if (resend_json_skip_value(p, val_end, &p) != 0 || p == obj)
             goto fail;
         if (n == cap) {
             if (cap && cap > SIZE_MAX / 2)
@@ -262,7 +262,7 @@ static int parse_object_array(const char *json, size_t len, const char *key, siz
         if (parse(obj, (size_t)(p - obj), items + n * item_size) != 0)
             goto fail;
         n++;
-        int step = json_array_step(&p, val_end);
+        int step = resend_json_array_step(&p, val_end);
         if (step < 0)
             goto fail;
         if (step == 0)
@@ -301,7 +301,7 @@ static int parse_attachments(const char *json, size_t len, resend_received_attac
 static int parse_attachment_list(const char *json, size_t len,
                                  resend_received_attachment_list *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
+    if (resend_json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
     return parse_object_array(json, len, "data", sizeof(resend_received_attachment), parse_att_urls,
                               free_att, (void **)&out->items, &out->count);
@@ -309,15 +309,15 @@ static int parse_attachment_list(const char *json, size_t len,
 
 static int parse_received_envelope(const char *json, size_t len, resend_received *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_string(json, len, "id", &out->id) != 0 ||
-        json_opt_string(json, len, "from", &out->from) != 0 ||
-        json_opt_string(json, len, "subject", &out->subject) != 0 ||
-        json_opt_string(json, len, "message_id", &out->message_id) != 0 ||
-        json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
-        json_opt_string_array(json, len, "to", &out->to, &out->to_count) != 0 ||
-        json_opt_string_array(json, len, "cc", &out->cc, &out->cc_count) != 0 ||
-        json_opt_string_array(json, len, "bcc", &out->bcc, &out->bcc_count) != 0 ||
-        json_opt_string_array(json, len, "reply_to", &out->reply_to, &out->reply_to_count) != 0 ||
+    if (resend_json_opt_string(json, len, "id", &out->id) != 0 ||
+        resend_json_opt_string(json, len, "from", &out->from) != 0 ||
+        resend_json_opt_string(json, len, "subject", &out->subject) != 0 ||
+        resend_json_opt_string(json, len, "message_id", &out->message_id) != 0 ||
+        resend_json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
+        resend_json_opt_string_array(json, len, "to", &out->to, &out->to_count) != 0 ||
+        resend_json_opt_string_array(json, len, "cc", &out->cc, &out->cc_count) != 0 ||
+        resend_json_opt_string_array(json, len, "bcc", &out->bcc, &out->bcc_count) != 0 ||
+        resend_json_opt_string_array(json, len, "reply_to", &out->reply_to, &out->reply_to_count) != 0 ||
         parse_attachments(json, len, &out->attachments, &out->attachment_count) != 0 || !out->id) {
         resend_received_free(out);
         return -1;
@@ -328,10 +328,10 @@ static int parse_received_envelope(const char *json, size_t len, resend_received
 static int parse_received(const char *json, size_t len, resend_received *out) {
     if (parse_received_envelope(json, len, out) != 0)
         return -1;
-    if (json_opt_string(json, len, "html", &out->html) != 0 ||
-        json_opt_string(json, len, "html_format", &out->html_format) != 0 ||
-        json_opt_string(json, len, "text", &out->text) != 0 ||
-        json_opt_string_array(json, len, "received_for", &out->received_for,
+    if (resend_json_opt_string(json, len, "html", &out->html) != 0 ||
+        resend_json_opt_string(json, len, "html_format", &out->html_format) != 0 ||
+        resend_json_opt_string(json, len, "text", &out->text) != 0 ||
+        resend_json_opt_string_array(json, len, "received_for", &out->received_for,
                               &out->received_for_count) != 0 ||
         parse_headers(json, len, out) != 0 ||
         parse_authentication(json, len, &out->authentication) != 0 ||
@@ -352,7 +352,7 @@ static void free_recv(void *slot) {
 
 static int parse_received_list(const char *json, size_t len, resend_received_list *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
+    if (resend_json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
     return parse_object_array(json, len, "data", sizeof(resend_received), parse_env, free_recv,
                               (void **)&out->items, &out->count);

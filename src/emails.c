@@ -6,10 +6,10 @@
 #include <string.h>
 
 static int write_field(resend_buf *body, int *first, const char *key) {
-    if (!*first && json_comma(body) != 0)
+    if (!*first && resend_json_comma(body) != 0)
         return -1;
     *first = 0;
-    return json_key(body, key);
+    return resend_json_key(body, key);
 }
 
 static int write_string_field(resend_buf *body, int *first, const char *key, const char *value) {
@@ -17,7 +17,7 @@ static int write_string_field(resend_buf *body, int *first, const char *key, con
         return 0;
     if (write_field(body, first, key) != 0)
         return -1;
-    return json_string(body, value);
+    return resend_json_string(body, value);
 }
 
 static int write_string_array_field(resend_buf *body, int *first, const char *key,
@@ -26,7 +26,7 @@ static int write_string_array_field(resend_buf *body, int *first, const char *ke
         return 0;
     if (write_field(body, first, key) != 0)
         return -1;
-    return json_string_array(body, items, count);
+    return resend_json_string_array(body, items, count);
 }
 
 /* Exactly one of content or path. */
@@ -68,7 +68,7 @@ static char *base64_encode(const void *data, size_t len) {
 }
 
 static int write_attachment(resend_buf *body, const resend_attachment *a) {
-    if (json_object_begin(body) != 0)
+    if (resend_json_object_begin(body) != 0)
         return -1;
     int first = 1;
     if (write_string_field(body, &first, "filename", a->filename) != 0)
@@ -88,23 +88,23 @@ static int write_attachment(resend_buf *body, const resend_attachment *a) {
         return -1;
     if (write_string_field(body, &first, "content_id", a->content_id) != 0)
         return -1;
-    return json_object_end(body);
+    return resend_json_object_end(body);
 }
 
 static int write_attachments(resend_buf *body, const resend_attachment *attachments, size_t count) {
-    if (json_array_begin(body) != 0)
+    if (resend_json_array_begin(body) != 0)
         return -1;
     for (size_t i = 0; i < count; i++) {
-        if (i && json_comma(body) != 0)
+        if (i && resend_json_comma(body) != 0)
             return -1;
         if (write_attachment(body, &attachments[i]) != 0)
             return -1;
     }
-    return json_array_end(body);
+    return resend_json_array_end(body);
 }
 
 static int write_send_object(const resend_send *message, resend_buf *body) {
-    if (json_object_begin(body) != 0)
+    if (resend_json_object_begin(body) != 0)
         return -1;
 
     int first = 1;
@@ -129,13 +129,13 @@ static int write_send_object(const resend_send *message, resend_buf *body) {
     if (message->header_count > 0) {
         if (write_field(body, &first, "headers") != 0)
             return -1;
-        if (json_pair_object(body, message->headers, message->header_count) != 0)
+        if (resend_json_pair_object(body, message->headers, message->header_count) != 0)
             return -1;
     }
     if (message->tag_count > 0) {
         if (write_field(body, &first, "tags") != 0)
             return -1;
-        if (json_tag_array(body, message->tags, message->tag_count) != 0)
+        if (resend_json_tag_array(body, message->tags, message->tag_count) != 0)
             return -1;
     }
     if (message->attachment_count > 0) {
@@ -147,7 +147,7 @@ static int write_send_object(const resend_send *message, resend_buf *body) {
     if (write_string_field(body, &first, "scheduled_at", message->scheduled_at) != 0)
         return -1;
 
-    return json_object_end(body);
+    return resend_json_object_end(body);
 }
 
 static int write_send_body(const resend_send *message, resend_buf *body) {
@@ -161,15 +161,15 @@ static int write_send_body(const resend_send *message, resend_buf *body) {
 
 static int write_batch_body(const resend_batch *batch, resend_buf *body) {
     resend_buf_init(body);
-    if (json_array_begin(body) != 0)
+    if (resend_json_array_begin(body) != 0)
         goto fail;
     for (size_t i = 0; i < batch->count; i++) {
-        if (i && json_comma(body) != 0)
+        if (i && resend_json_comma(body) != 0)
             goto fail;
         if (write_send_object(&batch->messages[i], body) != 0)
             goto fail;
     }
-    if (json_array_end(body) != 0)
+    if (resend_json_array_end(body) != 0)
         goto fail;
     return 0;
 fail:
@@ -213,7 +213,7 @@ int resend_emails_send(resend *client, const resend_send *message, resend_sent *
 
     char *id = NULL;
     size_t len = resp.body.data ? resp.body.len : 0;
-    if (json_get_string(resp.body.data ? resp.body.data : "", len, "id", &id) != 0 || !id) {
+    if (resend_json_get_string(resp.body.data ? resp.body.data : "", len, "id", &id) != 0 || !id) {
         free(id);
         resend_error_set(client, (int)resp.status, NULL, "missing id");
         resend_http_response_free(&resp);
@@ -246,9 +246,9 @@ static int parse_sent_list(const char *json, size_t len, resend_sent_list *out) 
     memset(out, 0, sizeof *out);
     const char *val = NULL;
     const char *val_end = NULL;
-    if (json_member(json, len, "data", &val, &val_end) != 0)
+    if (resend_json_member(json, len, "data", &val, &val_end) != 0)
         return -1;
-    val = json_skip_ws(val, val_end);
+    val = resend_json_skip_ws(val, val_end);
     if (val >= val_end || *val != '[')
         return -1;
 
@@ -257,16 +257,16 @@ static int parse_sent_list(const char *json, size_t len, resend_sent_list *out) 
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
-        p = json_skip_ws(p, val_end);
+        p = resend_json_skip_ws(p, val_end);
         if (p < val_end && *p == ']')
             break;
         if (p >= val_end || *p != '{')
             goto fail;
         const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0)
+        if (resend_json_skip_value(p, val_end, &p) != 0)
             goto fail;
         char *id = NULL;
-        if (json_opt_string(obj, (size_t)(p - obj), "id", &id) != 0 || !id) {
+        if (resend_json_opt_string(obj, (size_t)(p - obj), "id", &id) != 0 || !id) {
             free(id);
             goto fail;
         }
@@ -282,7 +282,7 @@ static int parse_sent_list(const char *json, size_t len, resend_sent_list *out) 
         }
         items[n].id = id;
         n++;
-        int step = json_array_step(&p, val_end);
+        int step = resend_json_array_step(&p, val_end);
         if (step < 0)
             goto fail;
         if (step == 0)
@@ -389,18 +389,18 @@ void resend_email_free(resend_email *email) {
 
 static int parse_email(const char *json, size_t len, resend_email *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_string(json, len, "id", &out->id) != 0 ||
-        json_opt_string(json, len, "message_id", &out->message_id) != 0 ||
-        json_opt_string(json, len, "from", &out->from) != 0 ||
-        json_opt_string(json, len, "subject", &out->subject) != 0 ||
-        json_opt_string(json, len, "html", &out->html) != 0 ||
-        json_opt_string(json, len, "text", &out->text) != 0 ||
-        json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
-        json_opt_string(json, len, "last_event", &out->last_event) != 0 ||
-        json_opt_string_array(json, len, "to", &out->to, &out->to_count) != 0 ||
-        json_opt_string_array(json, len, "cc", &out->cc, &out->cc_count) != 0 ||
-        json_opt_string_array(json, len, "bcc", &out->bcc, &out->bcc_count) != 0 ||
-        json_opt_string_array(json, len, "reply_to", &out->reply_to, &out->reply_to_count) != 0 ||
+    if (resend_json_opt_string(json, len, "id", &out->id) != 0 ||
+        resend_json_opt_string(json, len, "message_id", &out->message_id) != 0 ||
+        resend_json_opt_string(json, len, "from", &out->from) != 0 ||
+        resend_json_opt_string(json, len, "subject", &out->subject) != 0 ||
+        resend_json_opt_string(json, len, "html", &out->html) != 0 ||
+        resend_json_opt_string(json, len, "text", &out->text) != 0 ||
+        resend_json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
+        resend_json_opt_string(json, len, "last_event", &out->last_event) != 0 ||
+        resend_json_opt_string_array(json, len, "to", &out->to, &out->to_count) != 0 ||
+        resend_json_opt_string_array(json, len, "cc", &out->cc, &out->cc_count) != 0 ||
+        resend_json_opt_string_array(json, len, "bcc", &out->bcc, &out->bcc_count) != 0 ||
+        resend_json_opt_string_array(json, len, "reply_to", &out->reply_to, &out->reply_to_count) != 0 ||
         !out->id) {
         resend_email_free(out);
         return -1;
@@ -461,19 +461,19 @@ void resend_email_list_free(resend_email_list *list) {
 
 static int parse_email_list(const char *json, size_t len, resend_email_list *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
+    if (resend_json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
 
     const char *val = NULL;
     const char *val_end = NULL;
     /* A well-formed object may omit data. Null data is an empty page. */
-    int found = json_member(json, len, "data", &val, &val_end);
+    int found = resend_json_member(json, len, "data", &val, &val_end);
     if (found < 0)
         return -1;
     if (found > 0)
         return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
         return 0;
     if (val >= val_end || *val != '[')
         return -1;
@@ -483,13 +483,13 @@ static int parse_email_list(const char *json, size_t len, resend_email_list *out
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
-        p = json_skip_ws(p, val_end);
+        p = resend_json_skip_ws(p, val_end);
         if (p < val_end && *p == ']')
             break;
         if (p >= val_end || *p != '{')
             goto fail;
         const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0)
+        if (resend_json_skip_value(p, val_end, &p) != 0)
             goto fail;
         if (n == cap) {
             size_t ncap = cap ? cap * 2 : 4;
@@ -502,7 +502,7 @@ static int parse_email_list(const char *json, size_t len, resend_email_list *out
         if (parse_email(obj, (size_t)(p - obj), &items[n]) != 0)
             goto fail;
         n++;
-        int step = json_array_step(&p, val_end);
+        int step = resend_json_array_step(&p, val_end);
         if (step < 0)
             goto fail;
         if (step == 0)
@@ -540,8 +540,8 @@ int resend_emails_update(resend *client, const char *email_id, const char *sched
 
     resend_buf body;
     resend_buf_init(&body);
-    if (json_object_begin(&body) != 0 || json_key(&body, "scheduled_at") != 0 ||
-        json_string(&body, scheduled_at) != 0 || json_object_end(&body) != 0) {
+    if (resend_json_object_begin(&body) != 0 || resend_json_key(&body, "scheduled_at") != 0 ||
+        resend_json_string(&body, scheduled_at) != 0 || resend_json_object_end(&body) != 0) {
         resend_buf_free(&body);
         resend_error_set(client, 0, NULL, "out of memory");
         return -1;
@@ -569,7 +569,7 @@ int resend_emails_update(resend *client, const char *email_id, const char *sched
 
     char *id = NULL;
     size_t len = resp.body.data ? resp.body.len : 0;
-    if (json_get_string(resp.body.data ? resp.body.data : "", len, "id", &id) != 0 || !id) {
+    if (resend_json_get_string(resp.body.data ? resp.body.data : "", len, "id", &id) != 0 || !id) {
         free(id);
         resend_error_set(client, (int)resp.status, NULL, "missing id");
         resend_http_response_free(&resp);

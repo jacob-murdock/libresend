@@ -41,49 +41,49 @@ int resend_buf_puts(resend_buf *b, const char *s);
 int resend_ascii_ncasecmp(const char *a, const char *b, size_t n);
 
 /* JSON writer. Keys and string values are escaped. */
-int json_object_begin(resend_buf *b);
-int json_object_end(resend_buf *b);
-int json_array_begin(resend_buf *b);
-int json_array_end(resend_buf *b);
-int json_comma(resend_buf *b);
-int json_key(resend_buf *b, const char *key);
-int json_string(resend_buf *b, const char *s);
-int json_string_array(resend_buf *b, const char *const *items, size_t count);
+int resend_json_object_begin(resend_buf *b);
+int resend_json_object_end(resend_buf *b);
+int resend_json_array_begin(resend_buf *b);
+int resend_json_array_end(resend_buf *b);
+int resend_json_comma(resend_buf *b);
+int resend_json_key(resend_buf *b, const char *key);
+int resend_json_string(resend_buf *b, const char *s);
+int resend_json_string_array(resend_buf *b, const char *const *items, size_t count);
 /* Object of string pairs: {"k":"v",...}. */
-int json_pair_object(resend_buf *b, const resend_pair *pairs, size_t count);
+int resend_json_pair_object(resend_buf *b, const resend_pair *pairs, size_t count);
 /* Array of {name,value} objects for tags. */
-int json_tag_array(resend_buf *b, const resend_pair *tags, size_t count);
+int resend_json_tag_array(resend_buf *b, const resend_pair *tags, size_t count);
 
 /* First top-level string field named key. *out is malloc'd. */
-int json_get_string(const char *json, size_t len, const char *key, char **out);
+int resend_json_get_string(const char *json, size_t len, const char *key, char **out);
 
 /* Reader primitives. A slice is one JSON value; unknown object fields are skipped.
  * Malformed JSON is -1. Nesting deeper than 64 is malformed. */
-const char *json_skip_ws(const char *p, const char *end);
-int json_parse_string(const char *p, const char *end, char **out, const char **next);
-int json_skip_value(const char *p, const char *end, const char **next);
+const char *resend_json_skip_ws(const char *p, const char *end);
+int resend_json_parse_string(const char *p, const char *end, char **out, const char **next);
+int resend_json_skip_value(const char *p, const char *end, const char **next);
 /* After an array element: 1 if another follows (*p at that value), 0 at ']', -1 if malformed. */
-int json_array_step(const char **p, const char *end);
+int resend_json_array_step(const char **p, const char *end);
 /* True for a null token, with optional trailing whitespace. */
-int json_is_null(const char *p, const char *end);
+int resend_json_is_null(const char *p, const char *end);
 /* Missing or JSON null -> *out NULL and 0. Wrong type or malformed -> -1. */
-int json_opt_string(const char *json, size_t len, const char *key, char **out);
+int resend_json_opt_string(const char *json, size_t len, const char *key, char **out);
 /* Missing or null -> empty array (*out NULL, *count 0). Wrong type or malformed -> -1. */
-int json_opt_string_array(const char *json, size_t len, const char *key, char ***out, size_t *count);
+int resend_json_opt_string_array(const char *json, size_t len, const char *key, char ***out, size_t *count);
 /* Missing or null -> *out 0. Wrong type or malformed -> -1. */
-int json_opt_bool(const char *json, size_t len, const char *key, int *out);
+int resend_json_opt_bool(const char *json, size_t len, const char *key, int *out);
 /* Missing or null -> *out 0. Non-integer, out of int64 range, or malformed -> -1. */
-int json_opt_i64(const char *json, size_t len, const char *key, int64_t *out);
+int resend_json_opt_i64(const char *json, size_t len, const char *key, int64_t *out);
 /*
  * Call fn for each member of one object, in order. key is valid only for that
  * call. A non-zero return from fn stops the walk and is returned as-is.
  * The slice is one object; trailing non-space is malformed.
  */
-int json_each_member(const char *json, size_t len,
+int resend_json_each_member(const char *json, size_t len,
                      int (*fn)(const char *key, const char *val, const char *val_end, void *ctx),
                      void *ctx);
 /* 0 found, 1 absent, -1 malformed. *val..*val_end is the raw value span. */
-int json_member(const char *json, size_t len, const char *key, const char **val, const char **val_end);
+int resend_json_member(const char *json, size_t len, const char *key, const char **val, const char **val_end);
 
 typedef struct {
     long status; /* 0 when no HTTP response */

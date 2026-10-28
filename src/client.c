@@ -70,8 +70,8 @@ void resend_error_from_body(resend *client, int status, const char *body, size_t
     char *name = NULL;
     char *message = NULL;
     if (body && len) {
-        (void)json_get_string(body, len, "name", &name);
-        (void)json_get_string(body, len, "message", &message);
+        (void)resend_json_get_string(body, len, "name", &name);
+        (void)resend_json_get_string(body, len, "message", &message);
     }
     resend_error_set(client, status, name, message ? message : "");
     free(name);

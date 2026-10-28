@@ -39,11 +39,11 @@ void resend_domain_free(resend_domain *domain) {
 static int object_member(const char *json, size_t len, const char *key, const char **val,
                          size_t *n) {
     const char *end = NULL;
-    int st = json_member(json, len, key, val, &end);
+    int st = resend_json_member(json, len, key, val, &end);
     if (st != 0)
         return st;
-    const char *p = json_skip_ws(*val, end);
-    if (json_is_null(p, end))
+    const char *p = resend_json_skip_ws(*val, end);
+    if (resend_json_is_null(p, end))
         return 1;
     if (p >= end || *p != '{')
         return -1;
@@ -56,15 +56,15 @@ static int object_member(const char *json, size_t len, const char *key, const ch
 static int record_priority(const char *json, size_t len, int *out) {
     const char *val = NULL;
     const char *val_end = NULL;
-    int st = json_member(json, len, "priority", &val, &val_end);
+    int st = resend_json_member(json, len, "priority", &val, &val_end);
     if (st < 0)
         return -1;
-    if (st > 0 || json_is_null(json_skip_ws(val, val_end), val_end)) {
+    if (st > 0 || resend_json_is_null(resend_json_skip_ws(val, val_end), val_end)) {
         *out = -1;
         return 0;
     }
     int64_t n = 0;
-    if (json_opt_i64(json, len, "priority", &n) != 0 || n < INT_MIN || n > INT_MAX)
+    if (resend_json_opt_i64(json, len, "priority", &n) != 0 || n < INT_MIN || n > INT_MAX)
         return -1;
     *out = (int)n;
     return 0;
@@ -73,12 +73,12 @@ static int record_priority(const char *json, size_t len, int *out) {
 static int parse_record(const char *json, size_t len, resend_dns_record *out) {
     memset(out, 0, sizeof *out);
     out->priority = -1;
-    if (json_opt_string(json, len, "record", &out->record) != 0 ||
-        json_opt_string(json, len, "name", &out->name) != 0 ||
-        json_opt_string(json, len, "type", &out->type) != 0 ||
-        json_opt_string(json, len, "value", &out->value) != 0 ||
-        json_opt_string(json, len, "status", &out->status) != 0 ||
-        json_opt_string(json, len, "ttl", &out->ttl) != 0 ||
+    if (resend_json_opt_string(json, len, "record", &out->record) != 0 ||
+        resend_json_opt_string(json, len, "name", &out->name) != 0 ||
+        resend_json_opt_string(json, len, "type", &out->type) != 0 ||
+        resend_json_opt_string(json, len, "value", &out->value) != 0 ||
+        resend_json_opt_string(json, len, "status", &out->status) != 0 ||
+        resend_json_opt_string(json, len, "ttl", &out->ttl) != 0 ||
         record_priority(json, len, &out->priority) != 0) {
         free_record(out);
         return -1;
@@ -91,13 +91,13 @@ static int parse_records(const char *json, size_t len, resend_dns_record **out, 
     *count = 0;
     const char *val = NULL;
     const char *val_end = NULL;
-    int st = json_member(json, len, "records", &val, &val_end);
+    int st = resend_json_member(json, len, "records", &val, &val_end);
     if (st < 0)
         return -1;
     if (st > 0)
         return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
         return 0;
     if (val >= val_end || *val != '[')
         return -1;
@@ -107,13 +107,13 @@ static int parse_records(const char *json, size_t len, resend_dns_record **out, 
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
-        p = json_skip_ws(p, val_end);
+        p = resend_json_skip_ws(p, val_end);
         if (p < val_end && *p == ']')
             break;
         if (p >= val_end || *p != '{')
             goto fail;
         const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0 || p == obj)
+        if (resend_json_skip_value(p, val_end, &p) != 0 || p == obj)
             goto fail;
         if (n == cap) {
             size_t ncap = cap ? cap * 2 : 4;
@@ -126,7 +126,7 @@ static int parse_records(const char *json, size_t len, resend_dns_record **out, 
         if (parse_record(obj, (size_t)(p - obj), &items[n]) != 0)
             goto fail;
         n++;
-        int step = json_array_step(&p, val_end);
+        int step = resend_json_array_step(&p, val_end);
         if (step < 0)
             goto fail;
         if (step == 0)
@@ -149,8 +149,8 @@ static int parse_capabilities(const char *json, size_t len, resend_domain *out) 
     int st = object_member(json, len, "capabilities", &val, &n);
     if (st != 0)
         return st < 0 ? -1 : 0;
-    if (json_opt_string(val, n, "sending", &out->sending) != 0 ||
-        json_opt_string(val, n, "receiving", &out->receiving) != 0)
+    if (resend_json_opt_string(val, n, "sending", &out->sending) != 0 ||
+        resend_json_opt_string(val, n, "receiving", &out->receiving) != 0)
         return -1;
     return 0;
 }
@@ -161,16 +161,16 @@ static int parse_capabilities(const char *json, size_t len, resend_domain *out) 
  */
 static int parse_domain(const char *json, size_t len, resend_domain *out, int with_detail) {
     memset(out, 0, sizeof *out);
-    if (json_opt_string(json, len, "id", &out->id) != 0 ||
-        json_opt_string(json, len, "name", &out->name) != 0 ||
-        json_opt_string(json, len, "status", &out->status) != 0 ||
-        json_opt_string(json, len, "region", &out->region) != 0 ||
-        json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
-        json_opt_bool(json, len, "open_tracking", &out->open_tracking) != 0 ||
-        json_opt_bool(json, len, "click_tracking", &out->click_tracking) != 0 ||
+    if (resend_json_opt_string(json, len, "id", &out->id) != 0 ||
+        resend_json_opt_string(json, len, "name", &out->name) != 0 ||
+        resend_json_opt_string(json, len, "status", &out->status) != 0 ||
+        resend_json_opt_string(json, len, "region", &out->region) != 0 ||
+        resend_json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
+        resend_json_opt_bool(json, len, "open_tracking", &out->open_tracking) != 0 ||
+        resend_json_opt_bool(json, len, "click_tracking", &out->click_tracking) != 0 ||
         parse_capabilities(json, len, out) != 0 ||
         (with_detail &&
-         json_opt_string(json, len, "tracking_subdomain", &out->tracking_subdomain) != 0) ||
+         resend_json_opt_string(json, len, "tracking_subdomain", &out->tracking_subdomain) != 0) ||
         (with_detail && parse_records(json, len, &out->records, &out->record_count) != 0) ||
         !out->id) {
         resend_domain_free(out);
@@ -227,18 +227,18 @@ void resend_domain_list_free(resend_domain_list *list) {
 
 static int parse_domain_list(const char *json, size_t len, resend_domain_list *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
+    if (resend_json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
 
     const char *val = NULL;
     const char *val_end = NULL;
-    int found = json_member(json, len, "data", &val, &val_end);
+    int found = resend_json_member(json, len, "data", &val, &val_end);
     if (found < 0)
         return -1;
     if (found > 0)
         return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
         return 0;
     if (val >= val_end || *val != '[')
         return -1;
@@ -248,13 +248,13 @@ static int parse_domain_list(const char *json, size_t len, resend_domain_list *o
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
-        p = json_skip_ws(p, val_end);
+        p = resend_json_skip_ws(p, val_end);
         if (p < val_end && *p == ']')
             break;
         if (p >= val_end || *p != '{')
             goto fail;
         const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0 || p == obj)
+        if (resend_json_skip_value(p, val_end, &p) != 0 || p == obj)
             goto fail;
         if (n == cap) {
             size_t ncap = cap ? cap * 2 : 4;
@@ -267,7 +267,7 @@ static int parse_domain_list(const char *json, size_t len, resend_domain_list *o
         if (parse_domain(obj, (size_t)(p - obj), &items[n], 0) != 0)
             goto fail;
         n++;
-        int step = json_array_step(&p, val_end);
+        int step = resend_json_array_step(&p, val_end);
         if (step < 0)
             goto fail;
         if (step == 0)
@@ -320,10 +320,10 @@ int resend_domains_list(resend *client, const resend_page *page, resend_domain_l
 }
 
 static int write_field(resend_buf *body, int *first, const char *key) {
-    if (!*first && json_comma(body) != 0)
+    if (!*first && resend_json_comma(body) != 0)
         return -1;
     *first = 0;
-    return json_key(body, key);
+    return resend_json_key(body, key);
 }
 
 static int write_string_field(resend_buf *body, int *first, const char *key, const char *value) {
@@ -331,7 +331,7 @@ static int write_string_field(resend_buf *body, int *first, const char *key, con
         return 0;
     if (write_field(body, first, key) != 0)
         return -1;
-    return json_string(body, value);
+    return resend_json_string(body, value);
 }
 
 static int write_bool_field(resend_buf *body, int *first, const char *key, const int *value) {
@@ -346,20 +346,20 @@ static int write_bool_field(resend_buf *body, int *first, const char *key, const
 static int write_capabilities(resend_buf *body, int *first, const resend_capabilities *caps) {
     if (!caps)
         return 0;
-    if (write_field(body, first, "capabilities") != 0 || json_object_begin(body) != 0)
+    if (write_field(body, first, "capabilities") != 0 || resend_json_object_begin(body) != 0)
         return -1;
     int inner = 1;
     if (write_string_field(body, &inner, "sending", caps->sending) != 0)
         return -1;
     if (write_string_field(body, &inner, "receiving", caps->receiving) != 0)
         return -1;
-    return json_object_end(body);
+    return resend_json_object_end(body);
 }
 
 static int write_create_body(const resend_domain_create *domain, resend_buf *body) {
     resend_buf_init(body);
     int first = 1;
-    if (json_object_begin(body) != 0)
+    if (resend_json_object_begin(body) != 0)
         goto fail;
     if (write_string_field(body, &first, "name", domain->name) != 0 ||
         write_string_field(body, &first, "region", domain->region) != 0 ||
@@ -368,7 +368,7 @@ static int write_create_body(const resend_domain_create *domain, resend_buf *bod
         write_string_field(body, &first, "tracking_subdomain", domain->tracking_subdomain) != 0 ||
         write_bool_field(body, &first, "open_tracking", domain->open_tracking) != 0 ||
         write_bool_field(body, &first, "click_tracking", domain->click_tracking) != 0 ||
-        write_capabilities(body, &first, domain->capabilities) != 0 || json_object_end(body) != 0)
+        write_capabilities(body, &first, domain->capabilities) != 0 || resend_json_object_end(body) != 0)
         goto fail;
     return 0;
 fail:
@@ -428,13 +428,13 @@ static int update_is_empty(const resend_domain_update *domain) {
 static int write_update_body(const resend_domain_update *domain, resend_buf *body) {
     resend_buf_init(body);
     int first = 1;
-    if (json_object_begin(body) != 0)
+    if (resend_json_object_begin(body) != 0)
         goto fail;
     if (write_string_field(body, &first, "tls", domain->tls) != 0 ||
         write_string_field(body, &first, "tracking_subdomain", domain->tracking_subdomain) != 0 ||
         write_bool_field(body, &first, "open_tracking", domain->open_tracking) != 0 ||
         write_bool_field(body, &first, "click_tracking", domain->click_tracking) != 0 ||
-        write_capabilities(body, &first, domain->capabilities) != 0 || json_object_end(body) != 0)
+        write_capabilities(body, &first, domain->capabilities) != 0 || resend_json_object_end(body) != 0)
         goto fail;
     return 0;
 fail:

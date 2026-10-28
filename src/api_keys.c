@@ -29,17 +29,17 @@ void resend_api_key_list_free(resend_api_key_list *list) {
 static int parse_api_key(const char *json, size_t len, resend_api_key *out, int from_create) {
     memset(out, 0, sizeof *out);
     if (from_create) {
-        if (json_opt_string(json, len, "id", &out->id) != 0 ||
-            json_opt_string(json, len, "token", &out->token) != 0 || !out->id || !out->token) {
+        if (resend_json_opt_string(json, len, "id", &out->id) != 0 ||
+            resend_json_opt_string(json, len, "token", &out->token) != 0 || !out->id || !out->token) {
             resend_api_key_free(out);
             return -1;
         }
         return 0;
     }
-    if (json_opt_string(json, len, "id", &out->id) != 0 ||
-        json_opt_string(json, len, "name", &out->name) != 0 ||
-        json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
-        json_opt_string(json, len, "last_used_at", &out->last_used_at) != 0 || !out->id) {
+    if (resend_json_opt_string(json, len, "id", &out->id) != 0 ||
+        resend_json_opt_string(json, len, "name", &out->name) != 0 ||
+        resend_json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
+        resend_json_opt_string(json, len, "last_used_at", &out->last_used_at) != 0 || !out->id) {
         resend_api_key_free(out);
         return -1;
     }
@@ -48,18 +48,18 @@ static int parse_api_key(const char *json, size_t len, resend_api_key *out, int 
 
 static int parse_api_key_list(const char *json, size_t len, resend_api_key_list *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
+    if (resend_json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
 
     const char *val = NULL;
     const char *val_end = NULL;
-    int found = json_member(json, len, "data", &val, &val_end);
+    int found = resend_json_member(json, len, "data", &val, &val_end);
     if (found < 0)
         return -1;
     if (found > 0)
         return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
         return 0;
     if (val >= val_end || *val != '[')
         return -1;
@@ -69,13 +69,13 @@ static int parse_api_key_list(const char *json, size_t len, resend_api_key_list 
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
-        p = json_skip_ws(p, val_end);
+        p = resend_json_skip_ws(p, val_end);
         if (p < val_end && *p == ']')
             break;
         if (p >= val_end || *p != '{')
             goto fail;
         const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0 || p == obj)
+        if (resend_json_skip_value(p, val_end, &p) != 0 || p == obj)
             goto fail;
         if (n == cap) {
             size_t ncap = cap ? cap * 2 : 4;
@@ -88,7 +88,7 @@ static int parse_api_key_list(const char *json, size_t len, resend_api_key_list 
         if (parse_api_key(obj, (size_t)(p - obj), &items[n], 0) != 0)
             goto fail;
         n++;
-        int step = json_array_step(&p, val_end);
+        int step = resend_json_array_step(&p, val_end);
         if (step < 0)
             goto fail;
         if (step == 0)
@@ -106,10 +106,10 @@ fail:
 }
 
 static int write_field(resend_buf *body, int *first, const char *key) {
-    if (!*first && json_comma(body) != 0)
+    if (!*first && resend_json_comma(body) != 0)
         return -1;
     *first = 0;
-    return json_key(body, key);
+    return resend_json_key(body, key);
 }
 
 static int write_string_field(resend_buf *body, int *first, const char *key, const char *value) {
@@ -117,7 +117,7 @@ static int write_string_field(resend_buf *body, int *first, const char *key, con
         return 0;
     if (write_field(body, first, key) != 0)
         return -1;
-    return json_string(body, value);
+    return resend_json_string(body, value);
 }
 
 static int permission_ok(const char *permission) {
@@ -127,12 +127,12 @@ static int permission_ok(const char *permission) {
 static int write_key_body(const resend_api_key_create *key, resend_buf *body) {
     resend_buf_init(body);
     int first = 1;
-    if (json_object_begin(body) != 0)
+    if (resend_json_object_begin(body) != 0)
         goto fail;
     if (write_string_field(body, &first, "name", key->name) != 0 ||
         write_string_field(body, &first, "permission", key->permission) != 0 ||
         write_string_field(body, &first, "domain_id", key->domain_id) != 0 ||
-        json_object_end(body) != 0)
+        resend_json_object_end(body) != 0)
         goto fail;
     return 0;
 fail:
@@ -237,8 +237,8 @@ int resend_api_keys_update(resend *client, const char *api_key_id, const char *n
 
     resend_buf body;
     resend_buf_init(&body);
-    if (json_object_begin(&body) != 0 || json_key(&body, "name") != 0 ||
-        json_string(&body, name) != 0 || json_object_end(&body) != 0) {
+    if (resend_json_object_begin(&body) != 0 || resend_json_key(&body, "name") != 0 ||
+        resend_json_string(&body, name) != 0 || resend_json_object_end(&body) != 0) {
         resend_buf_free(&body);
         resend_error_set(client, 0, NULL, "out of memory");
         return -1;

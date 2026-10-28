@@ -27,12 +27,12 @@ void resend_suppression_list_free(resend_suppression_list *list) {
 
 static int parse_suppression(const char *json, size_t len, resend_suppression *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_string(json, len, "id", &out->id) != 0 ||
-        json_opt_string(json, len, "email", &out->email) != 0 ||
-        json_opt_string(json, len, "origin", &out->origin) != 0 ||
-        json_opt_string(json, len, "source_id", &out->source_id) != 0 ||
-        json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
-        json_opt_bool(json, len, "deleted", &out->deleted) != 0 || !out->id) {
+    if (resend_json_opt_string(json, len, "id", &out->id) != 0 ||
+        resend_json_opt_string(json, len, "email", &out->email) != 0 ||
+        resend_json_opt_string(json, len, "origin", &out->origin) != 0 ||
+        resend_json_opt_string(json, len, "source_id", &out->source_id) != 0 ||
+        resend_json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
+        resend_json_opt_bool(json, len, "deleted", &out->deleted) != 0 || !out->id) {
         resend_suppression_free(out);
         return -1;
     }
@@ -41,18 +41,18 @@ static int parse_suppression(const char *json, size_t len, resend_suppression *o
 
 static int parse_suppression_list(const char *json, size_t len, resend_suppression_list *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
+    if (resend_json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
 
     const char *val = NULL;
     const char *val_end = NULL;
-    int found = json_member(json, len, "data", &val, &val_end);
+    int found = resend_json_member(json, len, "data", &val, &val_end);
     if (found < 0)
         return -1;
     if (found > 0)
         return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
         return 0;
     if (val >= val_end || *val != '[')
         return -1;
@@ -62,13 +62,13 @@ static int parse_suppression_list(const char *json, size_t len, resend_suppressi
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
-        p = json_skip_ws(p, val_end);
+        p = resend_json_skip_ws(p, val_end);
         if (p < val_end && *p == ']')
             break;
         if (p >= val_end || *p != '{')
             goto fail;
         const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0 || p == obj)
+        if (resend_json_skip_value(p, val_end, &p) != 0 || p == obj)
             goto fail;
         if (n == cap) {
             size_t ncap = cap ? cap * 2 : 4;
@@ -81,7 +81,7 @@ static int parse_suppression_list(const char *json, size_t len, resend_suppressi
         if (parse_suppression(obj, (size_t)(p - obj), &items[n]) != 0)
             goto fail;
         n++;
-        int step = json_array_step(&p, val_end);
+        int step = resend_json_array_step(&p, val_end);
         if (step < 0)
             goto fail;
         if (step == 0)
@@ -100,8 +100,8 @@ fail:
 
 static int write_string_object(resend_buf *body, const char *key, const char *value) {
     resend_buf_init(body);
-    if (json_object_begin(body) != 0 || json_key(body, key) != 0 || json_string(body, value) != 0 ||
-        json_object_end(body) != 0) {
+    if (resend_json_object_begin(body) != 0 || resend_json_key(body, key) != 0 || resend_json_string(body, value) != 0 ||
+        resend_json_object_end(body) != 0) {
         resend_buf_free(body);
         return -1;
     }
@@ -111,8 +111,8 @@ static int write_string_object(resend_buf *body, const char *key, const char *va
 static int write_string_array_object(resend_buf *body, const char *key, const char *const *items,
                                      size_t count) {
     resend_buf_init(body);
-    if (json_object_begin(body) != 0 || json_key(body, key) != 0 ||
-        json_string_array(body, items, count) != 0 || json_object_end(body) != 0) {
+    if (resend_json_object_begin(body) != 0 || resend_json_key(body, key) != 0 ||
+        resend_json_string_array(body, items, count) != 0 || resend_json_object_end(body) != 0) {
         resend_buf_free(body);
         return -1;
     }

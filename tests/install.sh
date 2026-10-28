@@ -55,6 +55,13 @@ if printf '%s\n' "$dyn" | grep -E -q 'RPATH|RUNPATH'; then
     fail "RPATH would pin a shipped library"
 fi
 
+# Only the public API is exported. Internals stay hidden.
+syms=$(nm -D --defined-only "$so" | awk '{print $NF}')
+printf '%s\n' "$syms" | grep -q -x 'resend_init' || fail "resend_init is not exported"
+if printf '%s\n' "$syms" | grep -E -q '^(json_|resend_json_|resend_buf_|resend_http_|resend_error_|resend_path_|resend_ascii_|resend_attachment_get|resend_attachments_list)'; then
+    fail "internal symbols are exported"
+fi
+
 pc="$stage/usr/lib/pkgconfig/libresend.pc"
 grep -q '^prefix=/usr$' "$pc" || fail "prefix is not /usr"
 grep -q -x -F "Version: $version" "$pc" || fail "pkg-config version is not $version"

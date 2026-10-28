@@ -27,6 +27,18 @@
 extern "C" {
 #endif
 
+/*
+ * Shared-library export. Empty on Windows: visibility is not a Windows
+ * feature, and __declspec(dllexport) waits until a DLL is built.
+ */
+#if defined(_WIN32)
+#define RESEND_API
+#elif defined(__GNUC__)
+#define RESEND_API __attribute__((visibility("default")))
+#else
+#define RESEND_API
+#endif
+
 typedef struct resend resend;
 
 typedef struct {
@@ -35,11 +47,11 @@ typedef struct {
     const char *message; /* never NULL; empty string if unknown */
 } resend_error;
 
-resend *resend_init(const char *api_key);
-void resend_free(resend *client);
+RESEND_API resend *resend_init(const char *api_key);
+RESEND_API void resend_free(resend *client);
 /* Tests. Production calls api.resend.com. 0 stored the URL. */
-int resend_set_base_url(resend *client, const char *base_url);
-const resend_error *resend_last_error(const resend *client);
+RESEND_API int resend_set_base_url(resend *client, const char *base_url);
+RESEND_API const resend_error *resend_last_error(const resend *client);
 
 /* ---- shared pieces ----------------------------------------------------- */
 
@@ -151,24 +163,27 @@ typedef struct {
 } resend_email_list;
 
 /* 0 on success, -1 on failure. Details in resend_last_error. */
-int resend_emails_send(resend *client, const resend_send *message, resend_sent *out);
-int resend_emails_send_batch(resend *client, const resend_batch *batch, resend_sent_list *out);
-int resend_emails_get(resend *client, const char *email_id, resend_email *out);
-int resend_emails_list(resend *client, const resend_page *page, resend_email_list *out);
+RESEND_API int resend_emails_send(resend *client, const resend_send *message, resend_sent *out);
+RESEND_API int resend_emails_send_batch(resend *client, const resend_batch *batch,
+                                        resend_sent_list *out);
+RESEND_API int resend_emails_get(resend *client, const char *email_id, resend_email *out);
+RESEND_API int resend_emails_list(resend *client, const resend_page *page, resend_email_list *out);
 /* Reschedule a scheduled send. scheduled_at is natural language or ISO 8601. Fills id. */
-int resend_emails_update(resend *client, const char *email_id, const char *scheduled_at,
-                         resend_sent *out);
-int resend_emails_cancel(resend *client, const char *email_id, resend_email *out);
+RESEND_API int resend_emails_update(resend *client, const char *email_id, const char *scheduled_at,
+                                    resend_sent *out);
+RESEND_API int resend_emails_cancel(resend *client, const char *email_id, resend_email *out);
 /* Attachments of a sent email. Same type as a received attachment; resend_download fetches it. */
-int resend_emails_attachments_list(resend *client, const char *email_id, const resend_page *page,
-                                   resend_received_attachment_list *out);
-int resend_emails_attachment_get(resend *client, const char *email_id, const char *attachment_id,
-                                 resend_received_attachment *out);
+RESEND_API int resend_emails_attachments_list(resend *client, const char *email_id,
+                                              const resend_page *page,
+                                              resend_received_attachment_list *out);
+RESEND_API int resend_emails_attachment_get(resend *client, const char *email_id,
+                                            const char *attachment_id,
+                                            resend_received_attachment *out);
 
-void resend_sent_free(resend_sent *sent);
-void resend_sent_list_free(resend_sent_list *list);
-void resend_email_free(resend_email *email);
-void resend_email_list_free(resend_email_list *list);
+RESEND_API void resend_sent_free(resend_sent *sent);
+RESEND_API void resend_sent_list_free(resend_sent_list *list);
+RESEND_API void resend_email_free(resend_email *email);
+RESEND_API void resend_email_list_free(resend_email_list *list);
 
 /* ---- receiving --------------------------------------------------------- */
 
@@ -233,13 +248,16 @@ typedef struct {
 } resend_received_list;
 
 /* html_format is "data_uri", "cid", or NULL to omit the query. 64 MiB cap. */
-int resend_receiving_get(resend *client, const char *email_id, const char *html_format,
-                         resend_received *out);
-int resend_receiving_list(resend *client, const resend_page *page, resend_received_list *out);
-int resend_receiving_attachments_list(resend *client, const char *email_id, const resend_page *page,
-                                     resend_received_attachment_list *out);
-int resend_receiving_attachment_get(resend *client, const char *email_id, const char *attachment_id,
-                                   resend_received_attachment *out);
+RESEND_API int resend_receiving_get(resend *client, const char *email_id, const char *html_format,
+                                    resend_received *out);
+RESEND_API int resend_receiving_list(resend *client, const resend_page *page,
+                                     resend_received_list *out);
+RESEND_API int resend_receiving_attachments_list(resend *client, const char *email_id,
+                                                 const resend_page *page,
+                                                 resend_received_attachment_list *out);
+RESEND_API int resend_receiving_attachment_get(resend *client, const char *email_id,
+                                               const char *attachment_id,
+                                               resend_received_attachment *out);
 
 /*
  * Download raw.download_url, or an attachment download_url.
@@ -247,12 +265,13 @@ int resend_receiving_attachment_get(resend *client, const char *email_id, const 
  * Fails past 64 MiB. Aborts after a 30s stall; no total time cap.
  * *out_bytes is malloc'd; the caller frees it.
  */
-int resend_download(resend *client, const char *https_url, void **out_bytes, size_t *out_len);
+RESEND_API int resend_download(resend *client, const char *https_url, void **out_bytes,
+                               size_t *out_len);
 
-void resend_received_free(resend_received *email);
-void resend_received_list_free(resend_received_list *list);
-void resend_received_attachment_free(resend_received_attachment *attachment);
-void resend_received_attachment_list_free(resend_received_attachment_list *list);
+RESEND_API void resend_received_free(resend_received *email);
+RESEND_API void resend_received_list_free(resend_received_list *list);
+RESEND_API void resend_received_attachment_free(resend_received_attachment *attachment);
+RESEND_API void resend_received_attachment_list_free(resend_received_attachment_list *list);
 
 /* ---- webhooks ---------------------------------------------------------- */
 
@@ -270,11 +289,12 @@ typedef struct {
  * once-only delivery record svix ids themselves.
  * On success, *out is filled and must be passed to resend_event_free.
  */
-int resend_webhook_verify(const char *secret, const char *svix_id, const char *svix_timestamp,
-                          const char *svix_signature, const void *body, size_t body_len,
-                          resend_event *out, resend_error *err);
+RESEND_API int resend_webhook_verify(const char *secret, const char *svix_id,
+                                     const char *svix_timestamp, const char *svix_signature,
+                                     const void *body, size_t body_len, resend_event *out,
+                                     resend_error *err);
 
-void resend_event_free(resend_event *event);
+RESEND_API void resend_event_free(resend_event *event);
 
 /* ---- domains ----------------------------------------------------------- */
 
@@ -335,15 +355,17 @@ typedef struct {
     const resend_capabilities *capabilities;
 } resend_domain_update;
 
-int resend_domains_list(resend *client, const resend_page *page, resend_domain_list *out);
-int resend_domains_get(resend *client, const char *domain_id, resend_domain *out);
-int resend_domains_create(resend *client, const resend_domain_create *domain, resend_domain *out);
-int resend_domains_verify(resend *client, const char *domain_id);
-int resend_domains_update(resend *client, const char *domain_id, const resend_domain_update *domain);
-int resend_domains_remove(resend *client, const char *domain_id);
+RESEND_API int resend_domains_list(resend *client, const resend_page *page, resend_domain_list *out);
+RESEND_API int resend_domains_get(resend *client, const char *domain_id, resend_domain *out);
+RESEND_API int resend_domains_create(resend *client, const resend_domain_create *domain,
+                                     resend_domain *out);
+RESEND_API int resend_domains_verify(resend *client, const char *domain_id);
+RESEND_API int resend_domains_update(resend *client, const char *domain_id,
+                                     const resend_domain_update *domain);
+RESEND_API int resend_domains_remove(resend *client, const char *domain_id);
 
-void resend_domain_free(resend_domain *domain);
-void resend_domain_list_free(resend_domain_list *list);
+RESEND_API void resend_domain_free(resend_domain *domain);
+RESEND_API void resend_domain_list_free(resend_domain_list *list);
 
 /* ---- API keys ---------------------------------------------------------- */
 
@@ -367,14 +389,16 @@ typedef struct {
     int has_more;
 } resend_api_key_list;
 
-int resend_api_keys_create(resend *client, const resend_api_key_create *key, resend_api_key *out);
-int resend_api_keys_list(resend *client, const resend_page *page, resend_api_key_list *out);
+RESEND_API int resend_api_keys_create(resend *client, const resend_api_key_create *key,
+                                      resend_api_key *out);
+RESEND_API int resend_api_keys_list(resend *client, const resend_page *page,
+                                    resend_api_key_list *out);
 /* Renames the key. name is required. */
-int resend_api_keys_update(resend *client, const char *api_key_id, const char *name);
-int resend_api_keys_remove(resend *client, const char *api_key_id);
+RESEND_API int resend_api_keys_update(resend *client, const char *api_key_id, const char *name);
+RESEND_API int resend_api_keys_remove(resend *client, const char *api_key_id);
 
-void resend_api_key_free(resend_api_key *key);
-void resend_api_key_list_free(resend_api_key_list *list);
+RESEND_API void resend_api_key_free(resend_api_key *key);
+RESEND_API void resend_api_key_list_free(resend_api_key_list *list);
 
 /* ---- logs -------------------------------------------------------------- */
 
@@ -400,12 +424,12 @@ typedef struct {
     int has_more;
 } resend_log_list;
 
-int resend_logs_list(resend *client, const resend_page *page, resend_log_list *out);
+RESEND_API int resend_logs_list(resend *client, const resend_page *page, resend_log_list *out);
 /* 64 MiB cap. 30s total timeout. */
-int resend_logs_get(resend *client, const char *log_id, resend_log *out);
+RESEND_API int resend_logs_get(resend *client, const char *log_id, resend_log *out);
 
-void resend_log_free(resend_log *log);
-void resend_log_list_free(resend_log_list *list);
+RESEND_API void resend_log_free(resend_log *log);
+RESEND_API void resend_log_list_free(resend_log_list *list);
 
 /* ---- suppressions ------------------------------------------------------ */
 
@@ -432,19 +456,22 @@ typedef struct {
     size_t id_count;
 } resend_suppression_batch_remove;
 
-int resend_suppressions_add(resend *client, const char *email, resend_suppression *out);
-int resend_suppressions_list(resend *client, const resend_page *page, const char *origin,
-                             resend_suppression_list *out);
+RESEND_API int resend_suppressions_add(resend *client, const char *email, resend_suppression *out);
+RESEND_API int resend_suppressions_list(resend *client, const resend_page *page, const char *origin,
+                                        resend_suppression_list *out);
 /* suppression is an id or an email. */
-int resend_suppressions_get(resend *client, const char *suppression, resend_suppression *out);
-int resend_suppressions_remove(resend *client, const char *suppression, resend_suppression *out);
-int resend_suppressions_add_batch(resend *client, const char *const *emails, size_t count,
-                                  resend_suppression_list *out);
-int resend_suppressions_remove_batch(resend *client, const resend_suppression_batch_remove *req,
-                                     resend_suppression_list *out);
+RESEND_API int resend_suppressions_get(resend *client, const char *suppression,
+                                       resend_suppression *out);
+RESEND_API int resend_suppressions_remove(resend *client, const char *suppression,
+                                          resend_suppression *out);
+RESEND_API int resend_suppressions_add_batch(resend *client, const char *const *emails, size_t count,
+                                             resend_suppression_list *out);
+RESEND_API int resend_suppressions_remove_batch(resend *client,
+                                                const resend_suppression_batch_remove *req,
+                                                resend_suppression_list *out);
 
-void resend_suppression_free(resend_suppression *suppression);
-void resend_suppression_list_free(resend_suppression_list *list);
+RESEND_API void resend_suppression_free(resend_suppression *suppression);
+RESEND_API void resend_suppression_list_free(resend_suppression_list *list);
 
 #ifdef __cplusplus
 }

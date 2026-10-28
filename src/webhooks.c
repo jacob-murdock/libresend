@@ -206,27 +206,27 @@ static char *dup_span(const char *start, const char *end) {
 
 static int parse_event(const char *json, size_t len, resend_event *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_string(json, len, "type", &out->type) != 0 || !out->type) {
+    if (resend_json_opt_string(json, len, "type", &out->type) != 0 || !out->type) {
         resend_event_free(out);
         return -1;
     }
-    if (json_opt_string(json, len, "created_at", &out->created_at) != 0) {
+    if (resend_json_opt_string(json, len, "created_at", &out->created_at) != 0) {
         resend_event_free(out);
         return -1;
     }
 
     const char *val = NULL;
     const char *val_end = NULL;
-    int found = json_member(json, len, "data", &val, &val_end);
+    int found = resend_json_member(json, len, "data", &val, &val_end);
     if (found < 0) {
         resend_event_free(out);
         return -1;
     }
     if (found == 0) {
-        val = json_skip_ws(val, val_end);
+        val = resend_json_skip_ws(val, val_end);
         if (val < val_end && *val == '{') {
             const char *next = NULL;
-            if (json_skip_value(val, val_end, &next) != 0) {
+            if (resend_json_skip_value(val, val_end, &next) != 0) {
                 resend_event_free(out);
                 return -1;
             }
@@ -235,12 +235,12 @@ static int parse_event(const char *json, size_t len, resend_event *out) {
                 resend_event_free(out);
                 return -1;
             }
-            if (json_opt_string(out->data_json, (size_t)(next - val), "email_id",
+            if (resend_json_opt_string(out->data_json, (size_t)(next - val), "email_id",
                                 &out->email_id) != 0) {
                 resend_event_free(out);
                 return -1;
             }
-        } else if (!json_is_null(val, val_end)) {
+        } else if (!resend_json_is_null(val, val_end)) {
             resend_event_free(out);
             return -1;
         }

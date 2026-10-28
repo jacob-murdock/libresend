@@ -23,6 +23,10 @@ BUILD := build
 LIB   := $(BUILD)/libresend.a
 SO    := $(BUILD)/libresend.so.0
 CHECK := $(BUILD)/check
+HEADER_C99 := $(BUILD)/header_c99.o
+
+# Hide internals in the shared library. Public symbols use RESEND_API.
+LIB_CFLAGS := $(CFLAGS) -fvisibility=hidden
 
 LIB_SRCS := $(wildcard src/*.c)
 LIB_OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(LIB_SRCS))
@@ -43,16 +47,21 @@ $(BUILD)/pic:
 	mkdir -p $(BUILD)/pic
 
 $(BUILD)/%.o: src/%.c include/resend.h src/internal.h | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(LIB_CFLAGS) -c $< -o $@
 
 $(BUILD)/pic/%.o: src/%.c include/resend.h src/internal.h | $(BUILD)/pic
-	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
+	$(CC) $(CPPFLAGS) $(LIB_CFLAGS) -fPIC -c $< -o $@
 
 $(LIB): $(LIB_OBJS)
 	$(AR) rcs $@ $^
 
 $(SO): $(PIC_OBJS)
 	$(CC) $(CFLAGS) -shared -Wl,-soname,libresend.so.0 -Wl,-z,defs -o $@ $(PIC_OBJS) $(CURL_LIBS)
+
+# Empty translation unit: header is self-contained under C99 -pedantic.
+$(HEADER_C99): include/resend.h | $(BUILD)
+	printf '%s\n' '#include "resend.h"' | \
+	  $(CC) -std=c99 -pedantic -Wall -Wextra -Werror -Iinclude -c -x c - -o $@
 
 $(BUILD)/fake.o: tests/fake.c tests/fake.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c tests/fake.c -o $@
@@ -63,7 +72,7 @@ $(BUILD)/check.o: tests/check.c tests/fake.h include/resend.h | $(BUILD)
 $(CHECK): $(BUILD)/check.o $(BUILD)/fake.o $(LIB)
 	$(CC) $(CFLAGS) -o $@ $(BUILD)/check.o $(BUILD)/fake.o $(LIB) $(CURL_LIBS)
 
-check: $(CHECK)
+check: $(CHECK) $(HEADER_C99)
 	$(CHECK)
 	$(SHELL) tests/install.sh '$(MAKE)'
 	$(SHELL) tests/dist.sh '$(MAKE)'

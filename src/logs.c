@@ -43,13 +43,13 @@ static int opt_raw_json(const char *json, size_t len, const char *key, char **ou
     *out = NULL;
     const char *val = NULL;
     const char *val_end = NULL;
-    int st = json_member(json, len, key, &val, &val_end);
+    int st = resend_json_member(json, len, key, &val, &val_end);
     if (st < 0)
         return -1;
     if (st > 0)
         return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
         return 0;
     *out = dup_span(val, val_end);
     return *out ? 0 : -1;
@@ -58,12 +58,12 @@ static int opt_raw_json(const char *json, size_t len, const char *key, char **ou
 static int parse_log(const char *json, size_t len, resend_log *out) {
     memset(out, 0, sizeof *out);
     int64_t status = 0;
-    if (json_opt_string(json, len, "id", &out->id) != 0 ||
-        json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
-        json_opt_string(json, len, "endpoint", &out->endpoint) != 0 ||
-        json_opt_string(json, len, "method", &out->method) != 0 ||
-        json_opt_string(json, len, "user_agent", &out->user_agent) != 0 ||
-        json_opt_i64(json, len, "response_status", &status) != 0 || status < INT_MIN ||
+    if (resend_json_opt_string(json, len, "id", &out->id) != 0 ||
+        resend_json_opt_string(json, len, "created_at", &out->created_at) != 0 ||
+        resend_json_opt_string(json, len, "endpoint", &out->endpoint) != 0 ||
+        resend_json_opt_string(json, len, "method", &out->method) != 0 ||
+        resend_json_opt_string(json, len, "user_agent", &out->user_agent) != 0 ||
+        resend_json_opt_i64(json, len, "response_status", &status) != 0 || status < INT_MIN ||
         status > INT_MAX || opt_raw_json(json, len, "request_body", &out->request_body) != 0 ||
         opt_raw_json(json, len, "response_body", &out->response_body) != 0 || !out->id) {
         resend_log_free(out);
@@ -75,18 +75,18 @@ static int parse_log(const char *json, size_t len, resend_log *out) {
 
 static int parse_log_list(const char *json, size_t len, resend_log_list *out) {
     memset(out, 0, sizeof *out);
-    if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
+    if (resend_json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
 
     const char *val = NULL;
     const char *val_end = NULL;
-    int found = json_member(json, len, "data", &val, &val_end);
+    int found = resend_json_member(json, len, "data", &val, &val_end);
     if (found < 0)
         return -1;
     if (found > 0)
         return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
+    val = resend_json_skip_ws(val, val_end);
+    if (resend_json_is_null(val, val_end))
         return 0;
     if (val >= val_end || *val != '[')
         return -1;
@@ -96,13 +96,13 @@ static int parse_log_list(const char *json, size_t len, resend_log_list *out) {
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
-        p = json_skip_ws(p, val_end);
+        p = resend_json_skip_ws(p, val_end);
         if (p < val_end && *p == ']')
             break;
         if (p >= val_end || *p != '{')
             goto fail;
         const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0 || p == obj)
+        if (resend_json_skip_value(p, val_end, &p) != 0 || p == obj)
             goto fail;
         if (n == cap) {
             size_t ncap = cap ? cap * 2 : 4;
@@ -115,7 +115,7 @@ static int parse_log_list(const char *json, size_t len, resend_log_list *out) {
         if (parse_log(obj, (size_t)(p - obj), &items[n]) != 0)
             goto fail;
         n++;
-        int step = json_array_step(&p, val_end);
+        int step = resend_json_array_step(&p, val_end);
         if (step < 0)
             goto fail;
         if (step == 0)
