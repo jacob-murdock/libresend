@@ -10,6 +10,7 @@
 #define LIBRESEND_TIMEOUT_SEC 30
 #define LIBRESEND_CONNECT_TIMEOUT_SEC 2
 #define LIBRESEND_BODY_MAX (1024 * 1024)
+#define LIBRESEND_LARGE_BODY_MAX ((size_t)64 * 1024 * 1024)
 
 struct resend {
     char *api_key;
@@ -96,6 +97,8 @@ void resend_http_response_free(resend_http_response *r);
  */
 int resend_http_json(resend *client, const char *method, const char *path, const char *body,
                      const char *idempotency_key, resend_http_response *out);
+int resend_http_json_limit(resend *client, const char *method, const char *path, const char *body,
+                           const char *idempotency_key, size_t body_max, resend_http_response *out);
 
 /*
  * Build path with optional page query. Rejects after+before together (error slot,

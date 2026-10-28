@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -211,16 +212,21 @@ static int parse_attachment(const char *json, size_t len, resend_received_attach
     return 0;
 }
 
-static int parse_attachments(const char *json, size_t len, resend_received_attachment **out,
-                             size_t *count) {
+typedef int (*parse_item_fn)(const char *json, size_t len, void *slot);
+typedef void (*free_item_fn)(void *slot);
+
+/* Missing or null key is an empty array. */
+static int parse_object_array(const char *json, size_t len, const char *key, size_t item_size,
+                              parse_item_fn parse, free_item_fn free_item, void **out,
+                              size_t *count) {
     *out = NULL;
     *count = 0;
     const char *val = NULL;
     const char *val_end = NULL;
-    int st = json_member(json, len, "attachments", &val, &val_end);
-    if (st < 0)
+    int found = json_member(json, len, key, &val, &val_end);
+    if (found < 0)
         return -1;
-    if (st > 0)
+    if (found > 0)
         return 0;
     val = json_skip_ws(val, val_end);
     if (json_is_null(val, val_end))
@@ -229,7 +235,7 @@ static int parse_attachments(const char *json, size_t len, resend_received_attac
         return -1;
 
     const char *p = val + 1;
-    resend_received_attachment *items = NULL;
+    char *items = NULL;
     size_t n = 0;
     size_t cap = 0;
     for (;;) {
@@ -242,14 +248,18 @@ static int parse_attachments(const char *json, size_t len, resend_received_attac
         if (json_skip_value(p, val_end, &p) != 0 || p == obj)
             goto fail;
         if (n == cap) {
+            if (cap && cap > SIZE_MAX / 2)
+                goto fail;
             size_t ncap = cap ? cap * 2 : 4;
-            resend_received_attachment *ni = realloc(items, ncap * sizeof *ni);
+            if (item_size == 0 || ncap > SIZE_MAX / item_size)
+                goto fail;
+            char *ni = realloc(items, ncap * item_size);
             if (!ni)
                 goto fail;
             items = ni;
             cap = ncap;
         }
-        if (parse_attachment(obj, (size_t)(p - obj), &items[n], 0) != 0)
+        if (parse(obj, (size_t)(p - obj), items + n * item_size) != 0)
             goto fail;
         n++;
         int step = json_array_step(&p, val_end);
@@ -262,10 +272,30 @@ static int parse_attachments(const char *json, size_t len, resend_received_attac
     *count = n;
     return 0;
 fail:
-    for (size_t i = 0; i < n; i++)
-        resend_received_attachment_free(&items[i]);
-    free(items);
+    if (items) {
+        for (size_t i = 0; i < n; i++)
+            free_item(items + i * item_size);
+        free(items);
+    }
     return -1;
+}
+
+static int parse_att_meta(const char *json, size_t len, void *slot) {
+    return parse_attachment(json, len, slot, 0);
+}
+
+static int parse_att_urls(const char *json, size_t len, void *slot) {
+    return parse_attachment(json, len, slot, 1);
+}
+
+static void free_att(void *slot) {
+    resend_received_attachment_free(slot);
+}
+
+static int parse_attachments(const char *json, size_t len, resend_received_attachment **out,
+                             size_t *count) {
+    return parse_object_array(json, len, "attachments", sizeof(resend_received_attachment),
+                              parse_att_meta, free_att, (void **)out, count);
 }
 
 static int parse_attachment_list(const char *json, size_t len,
@@ -273,59 +303,8 @@ static int parse_attachment_list(const char *json, size_t len,
     memset(out, 0, sizeof *out);
     if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
-
-    const char *val = NULL;
-    const char *val_end = NULL;
-    int found = json_member(json, len, "data", &val, &val_end);
-    if (found < 0)
-        return -1;
-    if (found > 0)
-        return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
-        return 0;
-    if (val >= val_end || *val != '[')
-        return -1;
-
-    const char *p = val + 1;
-    resend_received_attachment *items = NULL;
-    size_t n = 0;
-    size_t cap = 0;
-    for (;;) {
-        p = json_skip_ws(p, val_end);
-        if (p < val_end && *p == ']')
-            break;
-        if (p >= val_end || *p != '{')
-            goto fail;
-        const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0 || p == obj)
-            goto fail;
-        if (n == cap) {
-            size_t ncap = cap ? cap * 2 : 4;
-            resend_received_attachment *ni = realloc(items, ncap * sizeof *ni);
-            if (!ni)
-                goto fail;
-            items = ni;
-            cap = ncap;
-        }
-        if (parse_attachment(obj, (size_t)(p - obj), &items[n], 1) != 0)
-            goto fail;
-        n++;
-        int step = json_array_step(&p, val_end);
-        if (step < 0)
-            goto fail;
-        if (step == 0)
-            break;
-    }
-    out->items = items;
-    out->count = n;
-    return 0;
-fail:
-    {
-        resend_received_attachment_list tmp = {.items = items, .count = n};
-        resend_received_attachment_list_free(&tmp);
-    }
-    return -1;
+    return parse_object_array(json, len, "data", sizeof(resend_received_attachment), parse_att_urls,
+                              free_att, (void **)&out->items, &out->count);
 }
 
 static int parse_received_envelope(const char *json, size_t len, resend_received *out) {
@@ -363,64 +342,36 @@ static int parse_received(const char *json, size_t len, resend_received *out) {
     return 0;
 }
 
+static int parse_env(const char *json, size_t len, void *slot) {
+    return parse_received_envelope(json, len, slot);
+}
+
+static void free_recv(void *slot) {
+    resend_received_free(slot);
+}
+
 static int parse_received_list(const char *json, size_t len, resend_received_list *out) {
     memset(out, 0, sizeof *out);
     if (json_opt_bool(json, len, "has_more", &out->has_more) != 0)
         return -1;
+    return parse_object_array(json, len, "data", sizeof(resend_received), parse_env, free_recv,
+                              (void **)&out->items, &out->count);
+}
 
-    const char *val = NULL;
-    const char *val_end = NULL;
-    /* A well-formed object may omit data. Null data is an empty page. */
-    int found = json_member(json, len, "data", &val, &val_end);
-    if (found < 0)
+/* Takes ownership of path. Non-2xx fills the error slot from the JSON body. */
+static int receiving_get_ok(resend *client, char *path, size_t body_max,
+                            resend_http_response *resp) {
+    int rc = resend_http_json_limit(client, "GET", path, NULL, NULL, body_max, resp);
+    free(path);
+    if (rc != 0)
         return -1;
-    if (found > 0)
-        return 0;
-    val = json_skip_ws(val, val_end);
-    if (json_is_null(val, val_end))
-        return 0;
-    if (val >= val_end || *val != '[')
+    if (resp->status < 200 || resp->status >= 300) {
+        size_t len = resp->body.data ? resp->body.len : 0;
+        resend_error_from_body(client, (int)resp->status, resp->body.data, len);
+        resend_http_response_free(resp);
         return -1;
-
-    const char *p = val + 1;
-    resend_received *items = NULL;
-    size_t n = 0;
-    size_t cap = 0;
-    for (;;) {
-        p = json_skip_ws(p, val_end);
-        if (p < val_end && *p == ']')
-            break;
-        if (p >= val_end || *p != '{')
-            goto fail;
-        const char *obj = p;
-        if (json_skip_value(p, val_end, &p) != 0 || p == obj)
-            goto fail;
-        if (n == cap) {
-            size_t ncap = cap ? cap * 2 : 4;
-            resend_received *ni = realloc(items, ncap * sizeof *ni);
-            if (!ni)
-                goto fail;
-            items = ni;
-            cap = ncap;
-        }
-        if (parse_received_envelope(obj, (size_t)(p - obj), &items[n]) != 0)
-            goto fail;
-        n++;
-        int step = json_array_step(&p, val_end);
-        if (step < 0)
-            goto fail;
-        if (step == 0)
-            break;
     }
-    out->items = items;
-    out->count = n;
     return 0;
-fail:
-    {
-        resend_received_list tmp = {.items = items, .count = n};
-        resend_received_list_free(&tmp);
-    }
-    return -1;
 }
 
 int resend_receiving_get(resend *client, const char *email_id, const char *html_format,
@@ -447,18 +398,8 @@ int resend_receiving_get(resend *client, const char *email_id, const char *html_
         return -1;
 
     resend_http_response resp;
-    if (resend_http_json(client, "GET", path, NULL, NULL, &resp) != 0) {
-        free(path);
+    if (receiving_get_ok(client, path, LIBRESEND_LARGE_BODY_MAX, &resp) != 0)
         return -1;
-    }
-    free(path);
-
-    if (resp.status < 200 || resp.status >= 300) {
-        size_t len = resp.body.data ? resp.body.len : 0;
-        resend_error_from_body(client, (int)resp.status, resp.body.data, len);
-        resend_http_response_free(&resp);
-        return -1;
-    }
 
     size_t len = resp.body.data ? resp.body.len : 0;
     if (parse_received(resp.body.data ? resp.body.data : "", len, out) != 0) {
@@ -482,18 +423,8 @@ int resend_receiving_list(resend *client, const resend_page *page, resend_receiv
         return -1;
 
     resend_http_response resp;
-    if (resend_http_json(client, "GET", path, NULL, NULL, &resp) != 0) {
-        free(path);
+    if (receiving_get_ok(client, path, LIBRESEND_BODY_MAX, &resp) != 0)
         return -1;
-    }
-    free(path);
-
-    if (resp.status < 200 || resp.status >= 300) {
-        size_t len = resp.body.data ? resp.body.len : 0;
-        resend_error_from_body(client, (int)resp.status, resp.body.data, len);
-        resend_http_response_free(&resp);
-        return -1;
-    }
 
     size_t len = resp.body.data ? resp.body.len : 0;
     if (parse_received_list(resp.body.data ? resp.body.data : "", len, out) != 0) {
@@ -525,18 +456,8 @@ int resend_receiving_attachments_list(resend *client, const char *email_id, cons
     free(base);
 
     resend_http_response resp;
-    if (resend_http_json(client, "GET", path, NULL, NULL, &resp) != 0) {
-        free(path);
+    if (receiving_get_ok(client, path, LIBRESEND_BODY_MAX, &resp) != 0)
         return -1;
-    }
-    free(path);
-
-    if (resp.status < 200 || resp.status >= 300) {
-        size_t len = resp.body.data ? resp.body.len : 0;
-        resend_error_from_body(client, (int)resp.status, resp.body.data, len);
-        resend_http_response_free(&resp);
-        return -1;
-    }
 
     size_t len = resp.body.data ? resp.body.len : 0;
     if (parse_attachment_list(resp.body.data ? resp.body.data : "", len, out) != 0) {
@@ -568,18 +489,8 @@ int resend_receiving_attachment_get(resend *client, const char *email_id, const 
     free(prefix);
 
     resend_http_response resp;
-    if (resend_http_json(client, "GET", path, NULL, NULL, &resp) != 0) {
-        free(path);
+    if (receiving_get_ok(client, path, LIBRESEND_BODY_MAX, &resp) != 0)
         return -1;
-    }
-    free(path);
-
-    if (resp.status < 200 || resp.status >= 300) {
-        size_t len = resp.body.data ? resp.body.len : 0;
-        resend_error_from_body(client, (int)resp.status, resp.body.data, len);
-        resend_http_response_free(&resp);
-        return -1;
-    }
 
     size_t len = resp.body.data ? resp.body.len : 0;
     if (parse_attachment(resp.body.data ? resp.body.data : "", len, out, 1) != 0) {

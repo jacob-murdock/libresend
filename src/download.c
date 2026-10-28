@@ -13,8 +13,6 @@
  * 64 MiB cap; same timeouts as API calls. *out_bytes is malloc'd.
  */
 
-#define RESEND_DOWNLOAD_MAX ((size_t)64 * 1024 * 1024)
-
 struct write_ctx {
     resend_buf *body;
     int overflow;
@@ -27,7 +25,7 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
         return 0;
     }
     size_t n = size * nmemb;
-    if (ctx->body->len > RESEND_DOWNLOAD_MAX || n > RESEND_DOWNLOAD_MAX - ctx->body->len) {
+    if (ctx->body->len > LIBRESEND_LARGE_BODY_MAX || n > LIBRESEND_LARGE_BODY_MAX - ctx->body->len) {
         ctx->overflow = 1;
         return 0;
     }

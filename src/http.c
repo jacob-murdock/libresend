@@ -1,6 +1,7 @@
 #include "internal.h"
 
 #include <curl/curl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,17 +136,23 @@ void resend_http_response_free(resend_http_response *r) {
 
 struct write_ctx {
     resend_buf *body;
+    size_t max;
     int overflow;
 };
 
 struct header_ctx {
+    int status;
     int drop_to_http;
 };
 
 static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
     struct write_ctx *ctx = userdata;
+    if (size != 0 && nmemb > SIZE_MAX / size) {
+        ctx->overflow = 1;
+        return 0;
+    }
     size_t n = size * nmemb;
-    if (ctx->body->len > LIBRESEND_BODY_MAX || n > LIBRESEND_BODY_MAX - ctx->body->len) {
+    if (ctx->body->len > ctx->max || n > ctx->max - ctx->body->len) {
         ctx->overflow = 1;
         return 0;
     }
@@ -156,11 +163,39 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
     return n;
 }
 
-/* Absolute http:// Location is a drop off HTTPS (and refused on HTTP too).
- * Relative and https:// targets are allowed; curl follows those. */
+/* Status line of one response, or -1. Curl passes one line per call. */
+static int http_status_line(const char *buf, size_t n) {
+    if (n < 5 || strncasecmp(buf, "HTTP/", 5) != 0)
+        return -1;
+    size_t i = 5;
+    while (i < n && buf[i] != ' ' && buf[i] != '\t')
+        i++;
+    while (i < n && (buf[i] == ' ' || buf[i] == '\t'))
+        i++;
+    if (n - i < 3)
+        return -1;
+    if (buf[i] < '0' || buf[i] > '9' || buf[i + 1] < '0' || buf[i + 1] > '9' ||
+        buf[i + 2] < '0' || buf[i + 2] > '9')
+        return -1;
+    if (i + 3 < n && buf[i + 3] >= '0' && buf[i + 3] <= '9')
+        return -1;
+    return (buf[i] - '0') * 100 + (buf[i + 1] - '0') * 10 + (buf[i + 2] - '0');
+}
+
+/* Absolute http:// on a 3xx is a drop off HTTPS (and refused on HTTP too).
+ * A Location on any other status is not a redirect: aborting would drop a
+ * response the server already produced. Relative and https:// targets are
+ * followed. */
 static size_t header_cb(char *buf, size_t size, size_t nitems, void *userdata) {
     struct header_ctx *ctx = userdata;
     size_t n = size * nitems;
+    int status = http_status_line(buf, n);
+    if (status >= 0) {
+        ctx->status = status;
+        return n;
+    }
+    if (ctx->status < 300 || ctx->status >= 400)
+        return n;
     if (n >= 9 && strncasecmp(buf, "Location:", 9) == 0) {
         const char *v = buf + 9;
         const char *end = buf + n;
@@ -187,6 +222,14 @@ static int no_ctl(const char *s) {
 
 int resend_http_json(resend *client, const char *method, const char *path, const char *body,
                      const char *idempotency_key, resend_http_response *out) {
+    return resend_http_json_limit(client, method, path, body, idempotency_key, LIBRESEND_BODY_MAX,
+                                  out);
+}
+
+int resend_http_json_limit(resend *client, const char *method, const char *path, const char *body,
+                           const char *idempotency_key, size_t body_max, resend_http_response *out) {
+    if (body_max == 0)
+        body_max = LIBRESEND_BODY_MAX;
     memset(out, 0, sizeof *out);
     resend_buf_init(&out->body);
     if (!no_ctl(client->base_url)) {
@@ -258,8 +301,8 @@ int resend_http_json(resend *client, const char *method, const char *path, const
         return -1;
     }
 
-    struct write_ctx wctx = {.body = &out->body, .overflow = 0};
-    struct header_ctx hctx = {.drop_to_http = 0};
+    struct write_ctx wctx = {.body = &out->body, .max = body_max, .overflow = 0};
+    struct header_ctx hctx = {.status = 0, .drop_to_http = 0};
 
     curl_easy_setopt(easy, CURLOPT_URL, url);
     /* Ids that are `.` or `..` are already rejected. Keep the path we built. */

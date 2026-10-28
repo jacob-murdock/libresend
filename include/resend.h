@@ -219,7 +219,7 @@ typedef struct {
     int has_more;
 } resend_received_list;
 
-/* html_format is "data_uri", "cid", or NULL to omit the query. */
+/* html_format is "data_uri", "cid", or NULL to omit the query. 64 MiB cap. */
 int resend_receiving_get(resend *client, const char *email_id, const char *html_format,
                          resend_received *out);
 int resend_receiving_list(resend *client, const resend_page *page, resend_received_list *out);

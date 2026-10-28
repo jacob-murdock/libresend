@@ -382,6 +382,90 @@ static void test_redirect_drop_http(void) {
     fake_stop(f);
 }
 
+/* Location on a 2xx is not a redirect. The send already happened. */
+static void test_location_on_success(void) {
+    static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
+    char raw[64];
+    snprintf(raw, sizeof raw, "{\"id\":\"%s\"}", id);
+
+    fake_exchange exchange = {
+        .status = 200,
+        .body = raw,
+        .location = "http://127.0.0.1:0/emails",
+    };
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+
+    char base[64];
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+
+    const char *const to[] = {"you@example.com"};
+    resend_send message = smoke_message(to);
+    resend_sent sent = {0};
+
+    resend *client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    CHECK(resend_set_base_url(client, base) == 0);
+    int rc = resend_emails_send(client, &message, &sent);
+    CHECK(rc == 0);
+    CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
+    CHECK(fake_request_count(f) == 1);
+
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/* A non-2xx keeps its status when it also carries Location: http://. */
+static void test_location_on_error(void) {
+    static const char body[] = "{\"name\":\"validation_error\","
+                               "\"message\":\"Invalid `from` field\"}";
+    fake_exchange exchange = {
+        .status = 422,
+        .body = body,
+        .location = "http://127.0.0.1:0/emails",
+    };
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+
+    char base[64];
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+
+    const char *const to[] = {"you@example.com"};
+    resend_send message = smoke_message(to);
+    resend_sent sent = {0};
+
+    resend *client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    CHECK(resend_set_base_url(client, base) == 0);
+    int rc = resend_emails_send(client, &message, &sent);
+    CHECK(rc == -1);
+    CHECK(sent.id == NULL);
+    CHECK(fake_request_count(f) == 1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "Invalid `from` field") == 0);
+
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+}
+
 /* Optional send fields land in the JSON body; NULL / count 0 omits. */
 static void test_send_fields(void) {
     static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
@@ -2043,6 +2127,46 @@ static void test_receiving_get(void) {
     CHECK(fake_request_count(f) == 8);
     resend_free(client);
     fake_stop(f);
+}
+
+static void test_receiving_body_cap(void) {
+    enum { big = 1024 * 1024 + 1 };
+    static const char prefix[] = "{\"id\":\"x\",\"html\":\"";
+    char *raw = malloc((size_t)big + 1);
+    CHECK(raw != NULL);
+    if (!raw)
+        return;
+    memcpy(raw, prefix, sizeof prefix - 1);
+    memset(raw + (sizeof prefix - 1), 'a', (size_t)big - (sizeof prefix - 1) - 2);
+    raw[big - 2] = '"';
+    raw[big - 1] = '}';
+    raw[big] = '\0';
+
+    fake_exchange exchange = {.status = 200, .body = raw};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f) {
+        free(raw);
+        return;
+    }
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        free(raw);
+        return;
+    }
+
+    resend_received email = {0};
+    int rc = resend_receiving_get(client, "x", "data_uri", &email);
+    CHECK(rc == 0);
+    CHECK(email.id != NULL && strcmp(email.id, "x") == 0);
+    CHECK(email.html != NULL && strlen(email.html) == (size_t)big - (sizeof prefix - 1) - 2);
+
+    resend_received_free(&email);
+    resend_free(client);
+    fake_stop(f);
+    free(raw);
 }
 
 /*
@@ -4084,6 +4208,8 @@ int main(void) {
     test_body_cap();
     test_redirect_follow();
     test_redirect_drop_http();
+    test_location_on_success();
+    test_location_on_error();
     test_send_fields();
     test_send_html_only();
     test_send_attachments();
@@ -4101,6 +4227,7 @@ int main(void) {
     test_json_nul();
     test_webhook_verify();
     test_receiving_get();
+    test_receiving_body_cap();
     test_receiving_list();
     test_receiving_attachments();
     test_download();
