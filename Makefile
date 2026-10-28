@@ -1,16 +1,20 @@
 # libresend. The shared library links libcurl and OpenSSL; it does not ship them.
 
 CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -pthread
-CPPFLAGS += -Iinclude -D_GNU_SOURCE $(shell pkg-config --cflags libcurl openssl)
-
-CURL_LIBS := $(shell pkg-config --libs libcurl openssl)
-ifeq ($(CURL_LIBS),)
-$(error pkg-config did not find libcurl and openssl)
-endif
+CPPFLAGS += -Iinclude -D_GNU_SOURCE
 
 VERSION := $(shell sed -n 's/^\#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' src/internal.h)
 ifeq ($(VERSION),)
 $(error LIBRESEND_VERSION missing from src/internal.h)
+endif
+
+# dist and clean need only git and sha256sum.
+ifneq ($(filter-out dist clean,$(or $(MAKECMDGOALS),all)),)
+CURL_LIBS := $(shell pkg-config --libs libcurl openssl)
+ifeq ($(CURL_LIBS),)
+$(error pkg-config did not find libcurl and openssl)
+endif
+CPPFLAGS += $(shell pkg-config --cflags libcurl openssl)
 endif
 
 PREFIX ?= /usr/local
@@ -28,7 +32,7 @@ EXAMPLES := send_email send_batch_email schedule_email with_attachments \
 	receiving domains api_keys webhook
 EXAMPLE_BINS := $(addprefix $(BUILD)/examples/,$(EXAMPLES))
 
-.PHONY: all check examples clean install
+.PHONY: all check examples clean install dist
 
 all: $(LIB)
 
@@ -62,6 +66,7 @@ $(CHECK): $(BUILD)/check.o $(BUILD)/fake.o $(LIB)
 check: $(CHECK)
 	$(CHECK)
 	$(SHELL) tests/install.sh '$(MAKE)'
+	$(SHELL) tests/dist.sh '$(MAKE)'
 
 $(BUILD)/examples:
 	mkdir -p $(BUILD)/examples
@@ -91,6 +96,15 @@ install: $(SO)
 	    'Cflags: -I$${includedir}'; \
 	} > $(DESTDIR)$(PREFIX)/lib/pkgconfig/libresend.pc
 	chmod 644 $(DESTDIR)$(PREFIX)/lib/pkgconfig/libresend.pc
+
+DIST_TAR := $(BUILD)/libresend-$(VERSION).tar.gz
+DIST_SUM := $(DIST_TAR).sha256
+
+dist:
+	mkdir -p $(BUILD)
+	rm -f $(DIST_TAR) $(DIST_SUM)
+	git archive --format=tar.gz --prefix=libresend-$(VERSION)/ -o $(DIST_TAR) HEAD
+	cd $(BUILD) && sha256sum libresend-$(VERSION).tar.gz > libresend-$(VERSION).tar.gz.sha256
 
 clean:
 	rm -rf $(BUILD)

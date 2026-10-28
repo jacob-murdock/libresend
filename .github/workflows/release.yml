@@ -1,0 +1,81 @@
+# GitHub Release on a v* tag that matches LIBRESEND_VERSION. Source tarball only.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      stable: ${{ steps.meta.outputs.stable }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          set -eu
+          matches=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' src/internal.h)
+          n=$(printf '%s\n' "$matches" | grep -c . || true)
+          if [ "$n" != 1 ]; then
+            echo "::error::LIBRESEND_VERSION must appear exactly once in src/internal.h"
+            exit 1
+          fi
+          version=$matches
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match LIBRESEND_VERSION $version"
+            exit 1
+          fi
+          case "$version" in
+            *-*) stable=false ;;
+            *) stable=true ;;
+          esac
+          {
+            echo "version=$version"
+            echo "stable=$stable"
+          } >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: verify
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: [verify, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: make dist
+        run: make dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: |
+            build/libresend-${{ needs.verify.outputs.version }}.tar.gz
+            build/libresend-${{ needs.verify.outputs.version }}.tar.gz.sha256
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          prerelease: ${{ needs.verify.outputs.stable != 'true' }}
+          make_latest: ${{ needs.verify.outputs.stable == 'true' }}

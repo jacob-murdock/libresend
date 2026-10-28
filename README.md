@@ -15,7 +15,7 @@ make
 make check
 ```
 
-`make` builds `build/libresend.a`. `make check` runs the suite against a loopback fake in the test process. It does not call Resend. `make examples` builds `build/examples/` and is not part of `make check`. `make install` lands with the pkg-config file.
+`make` builds `build/libresend.a`. `make check` runs the suite against a loopback fake in the test process. It does not call Resend. `make examples` builds `build/examples/` and is not part of `make check`. `make install` lands with the pkg-config file. `make dist` writes the versioned tarball and SHA-256 file from `git archive` of `HEAD`, and a matching `v*` tag publishes that pair. A tag whose version contains `-` is a prerelease. The release is source only.
 
 ## Send
 
