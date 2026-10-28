@@ -317,6 +317,11 @@ int resend_emails_send_batch(resend *client, const resend_batch *batch, resend_s
         resend_error_set(client, 0, NULL, "idempotency key longer than 256");
         return -1;
     }
+    if (batch->validation && strcmp(batch->validation, "strict") != 0 &&
+        strcmp(batch->validation, "permissive") != 0) {
+        resend_error_set(client, 0, NULL, "validation must be strict or permissive");
+        return -1;
+    }
     for (size_t i = 0; i < batch->count; i++) {
         if (batch->messages[i].attachment_count > 0) {
             resend_error_set(client, 0, NULL, "batch does not accept attachments");
@@ -331,8 +336,8 @@ int resend_emails_send_batch(resend *client, const resend_batch *batch, resend_s
     }
 
     resend_http_response resp;
-    if (resend_http_json(client, "POST", "/emails/batch", body.data, batch->idempotency_key,
-                         &resp) != 0) {
+    if (resend_http_json_limit(client, "POST", "/emails/batch", body.data, batch->idempotency_key,
+                               batch->validation, LIBRESEND_BODY_MAX, &resp) != 0) {
         resend_buf_free(&body);
         return -1;
     }

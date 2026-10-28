@@ -222,12 +222,13 @@ static int no_ctl(const char *s) {
 
 int resend_http_json(resend *client, const char *method, const char *path, const char *body,
                      const char *idempotency_key, resend_http_response *out) {
-    return resend_http_json_limit(client, method, path, body, idempotency_key, LIBRESEND_BODY_MAX,
-                                  out);
+    return resend_http_json_limit(client, method, path, body, idempotency_key, NULL,
+                                  LIBRESEND_BODY_MAX, out);
 }
 
 int resend_http_json_limit(resend *client, const char *method, const char *path, const char *body,
-                           const char *idempotency_key, size_t body_max, resend_http_response *out) {
+                           const char *idempotency_key, const char *batch_validation,
+                           size_t body_max, resend_http_response *out) {
     if (body_max == 0)
         body_max = LIBRESEND_BODY_MAX;
     memset(out, 0, sizeof *out);
@@ -242,6 +243,10 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
     }
     if (!no_ctl(idempotency_key)) {
         resend_error_set(client, 0, NULL, "idempotency key contains a control character");
+        return -1;
+    }
+    if (!no_ctl(batch_validation)) {
+        resend_error_set(client, 0, NULL, "batch validation contains a control character");
         return -1;
     }
 
@@ -263,6 +268,7 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
     size_t auth_len = strlen("Authorization: Bearer ") + strlen(client->api_key) + 1;
     char *auth = malloc(auth_len);
     char *idem = NULL;
+    char *batch_hdr = NULL;
     char ua[64];
     if (!auth) {
         curl_easy_cleanup(easy);
@@ -284,6 +290,19 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
         }
         snprintf(idem, idem_len, "Idempotency-Key: %s", idempotency_key);
     }
+    if (batch_validation) {
+        size_t batch_len = strlen("x-batch-validation: ") + strlen(batch_validation) + 1;
+        batch_hdr = malloc(batch_len);
+        if (!batch_hdr) {
+            free(idem);
+            free(auth);
+            curl_easy_cleanup(easy);
+            free(url);
+            resend_error_set(client, 0, NULL, "out of memory");
+            return -1;
+        }
+        snprintf(batch_hdr, batch_len, "x-batch-validation: %s", batch_validation);
+    }
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, auth);
@@ -292,8 +311,11 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
     headers = curl_slist_append(headers, "Content-Type: application/json");
     if (idem)
         headers = curl_slist_append(headers, idem);
+    if (batch_hdr)
+        headers = curl_slist_append(headers, batch_hdr);
     free(auth);
     free(idem);
+    free(batch_hdr);
     if (!headers) {
         curl_easy_cleanup(easy);
         free(url);

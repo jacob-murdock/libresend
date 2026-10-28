@@ -42,7 +42,7 @@ resend_free(c);
 
 A display name is part of the address string, as `Name <email>`. `to`, `cc`, `bcc`, and `reply_to` are arrays of those strings. `Idempotency-Key` is a request header, at most 256 characters, and it expires after 24 hours. `scheduled_at` is natural language (`in 1 min`) or ISO 8601. An attachment is raw bytes or a `path` URL.
 
-`resend_emails_send_batch` sends up to 100 messages in one call and uses the batch's idempotency key. `resend_emails_get` and `resend_emails_list` return the stored message, including `message_id` and `last_event`. `resend_emails_update` changes `scheduled_at` on a scheduled send and returns the id. `resend_emails_cancel` cancels a scheduled send and returns that message.
+`resend_emails_send_batch` sends up to 100 messages in one call and uses the batch's idempotency key. `validation` is `strict` or `permissive`, sent as `x-batch-validation`. NULL omits that header. Strict is the API default: one invalid message fails the batch. Permissive sends the valid messages, and the result is those ids. `resend_emails_get` and `resend_emails_list` return the stored message, including `message_id` and `last_event`. `resend_emails_update` changes `scheduled_at` on a scheduled send and returns the id. `resend_emails_cancel` cancels a scheduled send and returns that message.
 
 ## Receiving
 

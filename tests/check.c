@@ -1109,6 +1109,7 @@ static void test_emails_send_batch(void) {
     CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "POST") == 0);
     CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/emails/batch") == 0);
     CHECK(header_eq(f, "Idempotency-Key", "batch-1"));
+    CHECK(fake_header(f, "x-batch-validation") == NULL);
     CHECK(fake_body(f) != NULL &&
           strcmp(fake_body(f),
                  "[{\"from\":\"Acme <hello@example.com>\",\"to\":[\"one@example.com\"],"
@@ -1365,6 +1366,93 @@ static void test_emails_update(void) {
     CHECK(rc == 0);
     CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/emails/a%2Fb%20c%0A%3F") == 0);
     resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/*
+ * validation is strict or permissive, sent as x-batch-validation.
+ * NULL omits the header. Any other value is rejected with no request.
+ * A permissive body may include errors; those fields are ignored.
+ */
+static void test_emails_batch_validation(void) {
+    static const char permissive_body[] =
+        "{\"data\":[{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\"}],"
+        "\"errors\":[{\"index\":1,\"message\":\"Invalid email\"}]}";
+    fake_exchange permissive = {.status = 200, .body = permissive_body};
+    fake *f = fake_start(&permissive, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    const char *const to[] = {"one@example.com"};
+    resend_send message = smoke_message(to);
+    message.idempotency_key = "msg-key-ignored";
+    resend_batch batch = {
+        .messages = &message,
+        .count = 1,
+        .idempotency_key = "batch-1",
+        .validation = "permissive",
+    };
+    resend_sent_list sent = {0};
+    int rc = resend_emails_send_batch(client, &batch, &sent);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(header_eq(f, "x-batch-validation", "permissive"));
+    CHECK(header_eq(f, "Idempotency-Key", "batch-1"));
+    CHECK(body_eq(f, "[{\"from\":\"Acme <hello@example.com>\",\"to\":[\"one@example.com\"],"
+                      "\"subject\":\"Hello\",\"text\":\"Hello from C.\"}]"));
+    CHECK(fake_body(f) != NULL && strstr(fake_body(f), "validation") == NULL);
+    CHECK(sent.count == 1);
+    CHECK(sent.items != NULL && sent.items[0].id != NULL &&
+          strcmp(sent.items[0].id, "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794") == 0);
+    resend_sent_list_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char strict_body[] =
+        "{\"data\":[{\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\"}]}";
+    fake_exchange strict = {.status = 200, .body = strict_body};
+    f = fake_start(&strict, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    batch.idempotency_key = NULL;
+    batch.validation = "strict";
+    memset(&sent, 0, sizeof sent);
+    rc = resend_emails_send_batch(client, &batch, &sent);
+    CHECK(rc == 0);
+    CHECK(header_eq(f, "x-batch-validation", "strict"));
+    CHECK(fake_header(f, "Idempotency-Key") == NULL);
+    CHECK(sent.count == 1);
+    resend_sent_list_free(&sent);
+
+    const char *bad_modes[] = {"", "Strict", "loose", "permissive\r\nX-Injected: yes"};
+    for (size_t i = 0; i < sizeof bad_modes / sizeof bad_modes[0]; i++) {
+        batch.validation = bad_modes[i];
+        memset(&sent, 0x5a, sizeof sent);
+        rc = resend_emails_send_batch(client, &batch, &sent);
+        CHECK(rc == -1);
+        CHECK(sent.items == NULL);
+        CHECK(sent.count == 0);
+        const resend_error *err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 0);
+        CHECK(err->message != NULL &&
+              strcmp(err->message, "validation must be strict or permissive") == 0);
+    }
+    CHECK(fake_request_count(f) == 1);
     resend_free(client);
     fake_stop(f);
 }
@@ -4399,6 +4487,7 @@ int main(void) {
     test_emails_cancel();
     test_emails_update();
     test_emails_send_batch();
+    test_emails_batch_validation();
     test_emails_id_path();
     test_emails_list_query();
     test_emails_list_bad();

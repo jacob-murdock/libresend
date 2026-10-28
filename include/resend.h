@@ -96,6 +96,7 @@ typedef struct {
     const resend_send *messages;
     size_t count; /* Resend accepts up to 100 */
     const char *idempotency_key; /* this request's header; message keys are ignored */
+    const char *validation; /* "strict" or "permissive"; NULL omits x-batch-validation */
 } resend_batch;
 
 typedef struct {

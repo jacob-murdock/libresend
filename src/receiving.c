@@ -361,7 +361,7 @@ static int parse_received_list(const char *json, size_t len, resend_received_lis
 /* Takes ownership of path. Non-2xx fills the error slot from the JSON body. */
 static int receiving_get_ok(resend *client, char *path, size_t body_max,
                             resend_http_response *resp) {
-    int rc = resend_http_json_limit(client, "GET", path, NULL, NULL, body_max, resp);
+    int rc = resend_http_json_limit(client, "GET", path, NULL, NULL, NULL, body_max, resp);
     free(path);
     if (rc != 0)
         return -1;

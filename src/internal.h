@@ -93,12 +93,14 @@ void resend_http_response_free(resend_http_response *r);
 /*
  * One easy handle. System CA store. POST when body is non-NULL.
  * idempotency_key, when non-NULL, is sent as Idempotency-Key.
+ * batch_validation, when non-NULL, is sent as x-batch-validation.
  * On CURLE failure, fills the client error slot (status 0) and returns -1.
  */
 int resend_http_json(resend *client, const char *method, const char *path, const char *body,
                      const char *idempotency_key, resend_http_response *out);
 int resend_http_json_limit(resend *client, const char *method, const char *path, const char *body,
-                           const char *idempotency_key, size_t body_max, resend_http_response *out);
+                           const char *idempotency_key, const char *batch_validation,
+                           size_t body_max, resend_http_response *out);
 
 /*
  * Build path with optional page query. Rejects after+before together (error slot,
