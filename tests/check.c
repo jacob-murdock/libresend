@@ -993,6 +993,7 @@ static void test_emails_send_batch(void) {
             .to_count = 1,
             .subject = "One",
             .text = "first",
+            .scheduled_at = "in 1 min",
             .idempotency_key = "msg-key-ignored",
         },
         {
@@ -1027,7 +1028,7 @@ static void test_emails_send_batch(void) {
     CHECK(fake_body(f) != NULL &&
           strcmp(fake_body(f),
                  "[{\"from\":\"Acme <hello@example.com>\",\"to\":[\"one@example.com\"],"
-                 "\"subject\":\"One\",\"text\":\"first\"},"
+                 "\"subject\":\"One\",\"text\":\"first\",\"scheduled_at\":\"in 1 min\"},"
                  "{\"from\":\"Acme <hello@example.com>\",\"to\":[\"two@example.com\"],"
                  "\"subject\":\"Two\",\"text\":\"second\"}]") == 0);
     CHECK(fake_body(f) != NULL && strstr(fake_body(f), "idempotency") == NULL);

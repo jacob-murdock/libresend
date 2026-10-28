@@ -318,9 +318,10 @@ int resend_emails_send_batch(resend *client, const resend_batch *batch, resend_s
         return -1;
     }
     for (size_t i = 0; i < batch->count; i++) {
-        if (reject_bad_attachments(client, batch->messages[i].attachments,
-                                   batch->messages[i].attachment_count) != 0)
+        if (batch->messages[i].attachment_count > 0) {
+            resend_error_set(client, 0, NULL, "batch does not accept attachments");
             return -1;
+        }
     }
 
     resend_buf body;
