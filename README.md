@@ -15,15 +15,15 @@ make
 make check
 ```
 
-`make` builds `build/libresend.a`. `make check` runs the suite against a loopback fake in the test process. It does not call Resend. `make install` lands with the pkg-config file.
+`make` builds `build/libresend.a`. `make check` runs the suite against a loopback fake in the test process. It does not call Resend. `make examples` builds `build/examples/` and is not part of `make check`. `make install` lands with the pkg-config file.
 
 ## Send
 
 ```c
 resend *c = resend_init(getenv("RESEND_API_KEY"));
-const char *to[] = { "you@example.com" };
+const char *to[] = { "delivered@resend.dev" };
 resend_send req = {
-    .from = "Acme <hello@example.com>",
+    .from = "Acme <onboarding@resend.dev>",
     .to = to,
     .to_count = 1,
     .subject = "Hello",
@@ -40,9 +40,9 @@ resend_sent_free(&sent);
 resend_free(c);
 ```
 
-A display name is part of the address string, as `Name <email>`. `to`, `cc`, `bcc`, and `reply_to` are arrays of those strings. `Idempotency-Key` is a request header, at most 256 characters, and it expires after 24 hours. `scheduled_at` is natural language (`in 1 min`) or ISO 8601. An attachment is raw bytes or a `path` URL.
+A display name is part of the address string, as `Name <email>`. `to`, `cc`, `bcc`, and `reply_to` are arrays of those strings. Resend rejects recipients on domains such as `example.com`. Without a verified domain, send from `onboarding@resend.dev` to `delivered@resend.dev`, `bounced@resend.dev`, `complained@resend.dev`, or `suppressed@resend.dev`. `Idempotency-Key` is a request header, at most 256 characters, and it expires after 24 hours. `scheduled_at` is natural language (`in 1 min`) or ISO 8601. An attachment is raw bytes or a `path` URL.
 
-`resend_emails_send_batch` sends up to 100 messages in one call and uses the batch's idempotency key. `validation` is `strict` or `permissive`, sent as `x-batch-validation`. NULL omits that header. Strict is the API default: one invalid message fails the batch. Permissive sends the valid messages, and the result is those ids. `resend_emails_get` and `resend_emails_list` return the stored message, including `message_id` and `last_event`. `resend_emails_update` changes `scheduled_at` on a scheduled send and returns the id. `resend_emails_cancel` cancels a scheduled send and returns that message.
+`resend_emails_send_batch` sends up to 100 messages in one call and uses the batch's idempotency key. `validation` is `strict` or `permissive`, sent as `x-batch-validation`. NULL omits that header. Strict is the API default: one invalid message fails the batch. Permissive sends the valid messages, and the result is those ids. `resend_emails_get` and `resend_emails_list` return the stored message, including `message_id` and `last_event`. A get in the moment after send can return `not_found` until that record is visible. A scheduled send can report `last_event` `queued` before `scheduled`, and cancel fails with `Email is not scheduled` until then. `resend_emails_update` changes `scheduled_at` on a scheduled send and returns the id. `resend_emails_cancel` cancels a scheduled send and returns that message.
 
 `resend_emails_attachments_list` and `resend_emails_attachment_get` return attachments of a sent email. The type is the same one receiving uses, including `download_url` and `expires_at`. `resend_download` fetches that URL.
 

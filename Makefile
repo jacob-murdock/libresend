@@ -24,7 +24,11 @@ LIB_SRCS := $(wildcard src/*.c)
 LIB_OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(LIB_SRCS))
 PIC_OBJS := $(patsubst src/%.c,$(BUILD)/pic/%.o,$(LIB_SRCS))
 
-.PHONY: all check clean install
+EXAMPLES := send_email send_batch_email schedule_email with_attachments \
+	receiving domains api_keys webhook
+EXAMPLE_BINS := $(addprefix $(BUILD)/examples/,$(EXAMPLES))
+
+.PHONY: all check examples clean install
 
 all: $(LIB)
 
@@ -58,6 +62,14 @@ $(CHECK): $(BUILD)/check.o $(BUILD)/fake.o $(LIB)
 check: $(CHECK)
 	$(CHECK)
 	$(SHELL) tests/install.sh '$(MAKE)'
+
+$(BUILD)/examples:
+	mkdir -p $(BUILD)/examples
+
+$(BUILD)/examples/%: examples/%.c include/resend.h $(LIB) | $(BUILD)/examples
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< $(LIB) $(CURL_LIBS)
+
+examples: $(EXAMPLE_BINS)
 
 install: $(SO)
 	install -d $(DESTDIR)$(PREFIX)/lib/pkgconfig $(DESTDIR)$(PREFIX)/include
