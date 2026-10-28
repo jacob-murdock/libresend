@@ -133,6 +133,9 @@ int resend_emails_send(resend *client, const resend_send *message, resend_sent *
 int resend_emails_send_batch(resend *client, const resend_batch *batch, resend_sent_list *out);
 int resend_emails_get(resend *client, const char *email_id, resend_email *out);
 int resend_emails_list(resend *client, const resend_page *page, resend_email_list *out);
+/* Reschedule a scheduled send. scheduled_at is natural language or ISO 8601. Fills id. */
+int resend_emails_update(resend *client, const char *email_id, const char *scheduled_at,
+                         resend_sent *out);
 int resend_emails_cancel(resend *client, const char *email_id, resend_email *out);
 
 void resend_sent_free(resend_sent *sent);

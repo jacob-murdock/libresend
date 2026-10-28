@@ -1220,6 +1220,155 @@ static void test_emails_send_batch(void) {
     fake_stop(f);
 }
 
+static resend *client_on(fake *f);
+
+/* PATCH /emails/{id} sends scheduled_at only and fills the id. */
+static void test_emails_update(void) {
+    static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
+    static const char body[] =
+        "{\"object\":\"email\",\"id\":\"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794\","
+        "\"scheduled_at\":\"in 1 min\",\"last_event\":\"scheduled\"}";
+    fake_exchange exchange = {.status = 200, .body = body};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_sent sent = {0};
+    int rc = resend_emails_update(client, id, "in 1 min", &sent);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "PATCH") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/emails/49a3999c-0ce1-4ea6-ab68-afcd6dc2e794") == 0);
+    CHECK(body_eq(f, "{\"scheduled_at\":\"in 1 min\"}"));
+    CHECK(header_eq(f, "Authorization", "Bearer re_test"));
+    CHECK(header_eq(f, "Content-Type", "application/json"));
+    CHECK(fake_header(f, "Idempotency-Key") == NULL);
+    CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    memset(&sent, 0, sizeof sent);
+    rc = resend_emails_update(client, id, "in \"1\" min", &sent);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"scheduled_at\":\"in \\\"1\\\" min\"}"));
+    CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    memset(&sent, 0x5a, sizeof sent);
+    rc = resend_emails_update(client, id, NULL, &sent);
+    CHECK(rc == -1);
+    CHECK(sent.id == NULL);
+    rc = resend_emails_update(client, id, "", &sent);
+    CHECK(rc == -1);
+    CHECK(sent.id == NULL);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing scheduled_at") == 0);
+    CHECK(resend_emails_update(client, "", "in 1 min", &sent) == -1);
+    CHECK(resend_emails_update(client, "..", "in 1 min", &sent) == -1);
+    CHECK(resend_emails_update(client, "%2e%2e", "in 1 min", &sent) == -1);
+    CHECK(resend_emails_update(NULL, id, "in 1 min", &sent) == -1);
+    CHECK(fake_request_count(f) == 0);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange missing = {
+        .status = 422,
+        .body = "{\"name\":\"validation_error\",\"message\":\"scheduled_at is invalid\"}",
+    };
+    f = fake_start(&missing, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    memset(&sent, 0, sizeof sent);
+    rc = resend_emails_update(client, id, "yesterday", &sent);
+    CHECK(rc == -1);
+    CHECK(sent.id == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "scheduled_at is invalid") == 0);
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange no_id = {.status = 200, .body = "{\"object\":\"email\"}"};
+    f = fake_start(&no_id, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    memset(&sent, 0, sizeof sent);
+    rc = resend_emails_update(client, id, "in 1 min", &sent);
+    CHECK(rc == -1);
+    CHECK(sent.id == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 200);
+    CHECK(err->message != NULL && strcmp(err->message, "missing id") == 0);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    memset(&sent, 0, sizeof sent);
+    rc = resend_emails_update(client, "a/b c\n?", "in 1 min", &sent);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/emails/a%2Fb%20c%0A%3F") == 0);
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+}
+
 static resend *client_on(fake *f) {
     char base[64];
     snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
@@ -4248,6 +4397,7 @@ int main(void) {
     test_emails_get();
     test_emails_list();
     test_emails_cancel();
+    test_emails_update();
     test_emails_send_batch();
     test_emails_id_path();
     test_emails_list_query();

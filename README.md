@@ -42,7 +42,7 @@ resend_free(c);
 
 A display name is part of the address string, as `Name <email>`. `to`, `cc`, `bcc`, and `reply_to` are arrays of those strings. `Idempotency-Key` is a request header, at most 256 characters, and it expires after 24 hours. `scheduled_at` is natural language (`in 1 min`) or ISO 8601. An attachment is raw bytes or a `path` URL.
 
-`resend_emails_send_batch` sends up to 100 messages in one call and uses the batch's idempotency key. `resend_emails_get` and `resend_emails_list` return the stored message, including `message_id` and `last_event`. `resend_emails_cancel` cancels a scheduled send and returns that message.
+`resend_emails_send_batch` sends up to 100 messages in one call and uses the batch's idempotency key. `resend_emails_get` and `resend_emails_list` return the stored message, including `message_id` and `last_event`. `resend_emails_update` changes `scheduled_at` on a scheduled send and returns the id. `resend_emails_cancel` cancels a scheduled send and returns that message.
 
 ## Receiving
 
@@ -90,7 +90,7 @@ Lists take a `resend_page` (`after`, `before`, `limit`). NULL omits pagination. 
 
 | | |
 | --- | --- |
-| Emails | `resend_emails_send`, `resend_emails_send_batch`, `resend_emails_get`, `resend_emails_list`, `resend_emails_cancel` |
+| Emails | `resend_emails_send`, `resend_emails_send_batch`, `resend_emails_get`, `resend_emails_list`, `resend_emails_update`, `resend_emails_cancel` |
 | Receiving | `resend_receiving_get`, `resend_receiving_list`, `resend_receiving_attachments_list`, `resend_receiving_attachment_get`, `resend_download` |
 | Webhooks | `resend_webhook_verify` |
 | Domains | `resend_domains_create`, `resend_domains_get`, `resend_domains_list`, `resend_domains_verify`, `resend_domains_update`, `resend_domains_remove` |
@@ -102,7 +102,7 @@ Request pointers belong to the caller for the length of the call. A result belon
 
 ## Later
 
-Contacts, segments, broadcasts, templates, topics, and Inboxes. Also later: rescheduling a send, share links, domain claims, webhook endpoint management, and attachments of a sent email.
+Contacts, segments, broadcasts, templates, topics, and Inboxes. Also later: share links, domain claims, webhook endpoint management, and attachments of a sent email.
 
 A daemon that stores received mail is a separate project. It can link this library once send and receiving work.
 

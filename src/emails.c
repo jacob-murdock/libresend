@@ -518,6 +518,63 @@ int resend_emails_cancel(resend *client, const char *email_id, resend_email *out
     return email_by_id(client, "POST", email_id, "/cancel", out);
 }
 
+/*
+ * PATCH /emails/{id} with {"scheduled_at"}. The documented response is
+ * {object, id}. The OpenAPI response schema is the request body.
+ */
+int resend_emails_update(resend *client, const char *email_id, const char *scheduled_at,
+                         resend_sent *out) {
+    if (!client || !email_id || !email_id[0] || !out)
+        return -1;
+    resend_error_clear(client);
+    out->id = NULL;
+    if (!scheduled_at || !scheduled_at[0]) {
+        resend_error_set(client, 0, NULL, "missing scheduled_at");
+        return -1;
+    }
+
+    resend_buf body;
+    resend_buf_init(&body);
+    if (json_object_begin(&body) != 0 || json_key(&body, "scheduled_at") != 0 ||
+        json_string(&body, scheduled_at) != 0 || json_object_end(&body) != 0) {
+        resend_buf_free(&body);
+        resend_error_set(client, 0, NULL, "out of memory");
+        return -1;
+    }
+
+    char *path = NULL;
+    if (resend_path_with_id(client, "/emails/", email_id, NULL, &path) != 0) {
+        resend_buf_free(&body);
+        return -1;
+    }
+
+    resend_http_response resp;
+    int rc = resend_http_json(client, "PATCH", path, body.data, NULL, &resp);
+    free(path);
+    resend_buf_free(&body);
+    if (rc != 0)
+        return -1;
+
+    if (resp.status < 200 || resp.status >= 300) {
+        size_t len = resp.body.data ? resp.body.len : 0;
+        resend_error_from_body(client, (int)resp.status, resp.body.data, len);
+        resend_http_response_free(&resp);
+        return -1;
+    }
+
+    char *id = NULL;
+    size_t len = resp.body.data ? resp.body.len : 0;
+    if (json_get_string(resp.body.data ? resp.body.data : "", len, "id", &id) != 0 || !id) {
+        free(id);
+        resend_error_set(client, (int)resp.status, NULL, "missing id");
+        resend_http_response_free(&resp);
+        return -1;
+    }
+    resend_http_response_free(&resp);
+    out->id = id;
+    return 0;
+}
+
 int resend_emails_list(resend *client, const resend_page *page, resend_email_list *out) {
     if (!client || !out)
         return -1;
