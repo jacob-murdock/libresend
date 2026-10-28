@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 /* RFC 3986 unreserved characters stay literal. Everything else is %XX. */
 static int put_pct(resend_buf *b, const char *s) {
@@ -187,7 +186,7 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
 
 /* Status line of one response, or -1. Curl passes one line per call. */
 static int http_status_line(const char *buf, size_t n) {
-    if (n < 5 || strncasecmp(buf, "HTTP/", 5) != 0)
+    if (n < 5 || resend_ascii_ncasecmp(buf, "HTTP/", 5) != 0)
         return -1;
     size_t i = 5;
     while (i < n && buf[i] != ' ' && buf[i] != '\t')
@@ -218,12 +217,12 @@ static size_t header_cb(char *buf, size_t size, size_t nitems, void *userdata) {
     }
     if (ctx->status < 300 || ctx->status >= 400)
         return n;
-    if (n >= 9 && strncasecmp(buf, "Location:", 9) == 0) {
+    if (n >= 9 && resend_ascii_ncasecmp(buf, "Location:", 9) == 0) {
         const char *v = buf + 9;
         const char *end = buf + n;
         while (v < end && (*v == ' ' || *v == '\t'))
             v++;
-        if ((size_t)(end - v) >= 7 && strncasecmp(v, "http://", 7) == 0) {
+        if ((size_t)(end - v) >= 7 && resend_ascii_ncasecmp(v, "http://", 7) == 0) {
             ctx->drop_to_http = 1;
             return 0;
         }

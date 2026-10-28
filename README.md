@@ -8,7 +8,7 @@ The interface is [`include/resend.h`](include/resend.h). Names follow the [Resen
 
 ## Build
 
-Linux. Depends on libcurl, OpenSSL, and a C11 compiler. `pkg-config` names: `libcurl`, `openssl`.
+Portable C (C99 features, built as C11) on libcurl and OpenSSL. Tested on Linux. The Makefile's install target is Linux; the library compiles in CI on macOS and Windows (MinGW). `pkg-config` names: `libcurl`, `openssl`.
 
 ```bash
 make

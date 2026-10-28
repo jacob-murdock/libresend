@@ -37,6 +37,8 @@ int resend_buf_reserve(resend_buf *b, size_t need);
 int resend_buf_putc(resend_buf *b, char c);
 int resend_buf_put(resend_buf *b, const char *s, size_t n);
 int resend_buf_puts(resend_buf *b, const char *s);
+/* At most n bytes. Folds A-Z only. Stops at NUL. 0 when equal. */
+int resend_ascii_ncasecmp(const char *a, const char *b, size_t n);
 
 /* JSON writer. Keys and string values are escaped. */
 int json_object_begin(resend_buf *b);

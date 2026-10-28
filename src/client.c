@@ -1,19 +1,45 @@
 #include "internal.h"
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#endif
 #include <curl/curl.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <pthread.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
 static CURLcode curl_init_rc = CURLE_FAILED_INIT;
-static pthread_once_t curl_once = PTHREAD_ONCE_INIT;
 
 static void curl_once_init(void) {
     curl_init_rc = curl_global_init(CURL_GLOBAL_DEFAULT);
 }
 
+#ifdef _WIN32
+static INIT_ONCE curl_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK curl_once_cb(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+    (void)once;
+    (void)param;
+    (void)ctx;
+    curl_once_init();
+    return TRUE;
+}
+#else
+static pthread_once_t curl_once = PTHREAD_ONCE_INIT;
+#endif
+
 static int ensure_curl(void) {
+#ifdef _WIN32
+    InitOnceExecuteOnce(&curl_once, curl_once_cb, NULL, NULL);
+#else
     pthread_once(&curl_once, curl_once_init);
+#endif
     return curl_init_rc == CURLE_OK ? 0 : -1;
 }
 

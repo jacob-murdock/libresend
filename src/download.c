@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 /*
  * Plain GET of a signed URL, like resend-node's downloadRaw. Absolute https://
@@ -38,7 +37,7 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
 }
 
 static int https_scheme(const char *url) {
-    return url && strncasecmp(url, "https://", 8) == 0;
+    return url && resend_ascii_ncasecmp(url, "https://", 8) == 0;
 }
 
 static int has_ctl(const char *s) {

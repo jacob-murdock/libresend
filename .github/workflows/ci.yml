@@ -1,4 +1,5 @@
 # make check against the loopback fake. No Resend API key.
+# macOS, Windows, and C99 jobs compile the static library only.
 name: CI
 
 on:
@@ -63,3 +64,58 @@ jobs:
         run: |
           unset RESEND_API_KEY
           make check
+
+  compile-macos:
+    name: macos
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install curl and OpenSSL
+        run: brew install curl openssl pkg-config
+
+      - name: Build static library
+        run: |
+          export PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$(brew --prefix openssl)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+          make build/libresend.a
+
+  compile-windows:
+    name: windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: MINGW64
+          update: false
+          suppress-deprecation-warnings: msystem-mingw64
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-pkgconf
+            make
+
+      - name: Build static library
+        run: make build/libresend.a
+
+  compile-c99:
+    name: c99
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install libcurl headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
+
+      - name: Build static library
+        run: make build/libresend.a CFLAGS="-std=c99 -pedantic -Wall -Wextra -pthread"
