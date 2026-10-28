@@ -80,19 +80,26 @@ void resend_free(resend *client) {
     free(client);
 }
 
-void resend_set_base_url(resend *client, const char *base_url) {
-    if (!client || !base_url || !base_url[0])
-        return;
+int resend_set_base_url(resend *client, const char *base_url) {
+    if (!client)
+        return -1;
+    if (!base_url || !base_url[0]) {
+        resend_error_set(client, 0, NULL, "base url is required");
+        return -1;
+    }
     size_t n = strlen(base_url);
     while (n > 0 && base_url[n - 1] == '/')
         n--;
     char *copy = malloc(n + 1);
-    if (!copy)
-        return;
+    if (!copy) {
+        resend_error_set(client, 0, NULL, "out of memory");
+        return -1;
+    }
     memcpy(copy, base_url, n);
     copy[n] = '\0';
     free(client->base_url);
     client->base_url = copy;
+    return 0;
 }
 
 

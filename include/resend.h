@@ -37,8 +37,8 @@ typedef struct {
 
 resend *resend_init(const char *api_key);
 void resend_free(resend *client);
-/* Tests. Production calls api.resend.com. */
-void resend_set_base_url(resend *client, const char *base_url);
+/* Tests. Production calls api.resend.com. 0 stored the URL. */
+int resend_set_base_url(resend *client, const char *base_url);
 const resend_error *resend_last_error(const resend *client);
 
 /* ---- shared pieces ----------------------------------------------------- */

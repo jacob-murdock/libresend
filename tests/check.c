@@ -78,7 +78,7 @@ static void test_send(void) {
     resend *client = resend_init("re_test");
     CHECK(client != NULL);
     if (client) {
-        resend_set_base_url(client, base);
+        CHECK(resend_set_base_url(client, base) == 0);
         rc = resend_emails_send(client, &message, &sent);
     }
 
@@ -95,6 +95,60 @@ static void test_send(void) {
           strcmp(fake_body(f),
                  "{\"from\":\"Acme <hello@example.com>\",\"to\":[\"you@example.com\"],"
                  "\"subject\":\"Hello\",\"text\":\"Hello from C.\"}") == 0);
+
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/* Empty or NULL leaves the stored URL. A later send still hits the fake. */
+static void test_set_base_url(void) {
+    CHECK(resend_set_base_url(NULL, "https://example.com") == -1);
+
+    static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
+    char raw[64];
+    snprintf(raw, sizeof raw, "{\"id\":\"%s\"}", id);
+
+    fake_exchange exchange = {
+        .status = 200,
+        .body = raw,
+    };
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+
+    char base[64];
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+
+    resend *client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    CHECK(resend_set_base_url(client, NULL) == -1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "base url is required") == 0);
+
+    CHECK(resend_set_base_url(client, "") == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL && strcmp(err->message, "base url is required") == 0);
+
+    CHECK(resend_set_base_url(client, base) == 0);
+    CHECK(resend_set_base_url(client, "") == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL && strcmp(err->message, "base url is required") == 0);
+
+    const char *const to[] = {"you@example.com"};
+    resend_send message = smoke_message(to);
+    resend_sent sent = {0};
+    int rc = resend_emails_send(client, &message, &sent);
+    CHECK(rc == 0);
+    CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
+    CHECK(fake_request_count(f) == 1);
 
     resend_sent_free(&sent);
     resend_free(client);
@@ -133,7 +187,7 @@ static void test_error_body(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == -1);
     CHECK(sent.id == NULL);
@@ -152,7 +206,7 @@ static void test_error_body(void) {
     CHECK(strcmp(name, "validation_error") == 0);
     CHECK(strcmp(msg, "Invalid `from` field") == 0);
 
-    resend_set_base_url(client, "http://127.0.0.1:1");
+    CHECK(resend_set_base_url(client, "http://127.0.0.1:1") == 0);
     rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == -1);
     err = resend_last_error(client);
@@ -176,7 +230,7 @@ static void test_transport_failure(void) {
     if (!client)
         return;
 
-    resend_set_base_url(client, "http://127.0.0.1:1");
+    CHECK(resend_set_base_url(client, "http://127.0.0.1:1") == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == -1);
     CHECK(sent.id == NULL);
@@ -233,7 +287,7 @@ static void test_body_cap(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == -1);
     CHECK(sent.id == NULL);
@@ -275,7 +329,7 @@ static void test_redirect_follow(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == 0);
     CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
@@ -315,7 +369,7 @@ static void test_redirect_drop_http(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == -1);
     CHECK(sent.id == NULL);
@@ -385,7 +439,7 @@ static void test_send_fields(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == 0);
     CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
@@ -443,7 +497,7 @@ static void test_send_html_only(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == 0);
     CHECK(fake_body(f) != NULL &&
@@ -509,7 +563,7 @@ static void test_send_attachments(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == 0);
     CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
@@ -573,7 +627,7 @@ static void test_send_attachment_both(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == -1);
     CHECK(sent.id == NULL);
@@ -617,7 +671,7 @@ static void test_send_idempotency_key(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == 0);
     CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
@@ -667,7 +721,7 @@ static void test_send_idempotency_key_max(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
     CHECK(rc == -1);
     CHECK(sent.id == NULL);
@@ -729,7 +783,7 @@ static void test_emails_get(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_get(client, "4ef9a417-02e9-4d39-ad75-9611e0fcc33c", &email);
     CHECK(rc == 0);
     CHECK(fake_request_count(f) == 1);
@@ -801,8 +855,7 @@ static void test_emails_list(void) {
         fake_stop(f);
         return;
     }
-    resend_set_base_url(client, base);
-
+    CHECK(resend_set_base_url(client, base) == 0);
     resend_page both = {.after = "a", .before = "b", .limit = 10};
     resend_email_list list = {0};
     int rc = resend_emails_list(client, &both, &list);
@@ -849,8 +902,7 @@ static void test_emails_list(void) {
         fake_stop(f);
         return;
     }
-    resend_set_base_url(client, base);
-
+    CHECK(resend_set_base_url(client, base) == 0);
     resend_page limited = {.before = "cursor-2", .limit = 5};
     memset(&list, 0, sizeof list);
     rc = resend_emails_list(client, &limited, &list);
@@ -897,7 +949,7 @@ static void test_emails_cancel(void) {
         return;
     }
 
-    resend_set_base_url(client, base);
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_cancel(client, "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794", &email);
     CHECK(rc == 0);
     CHECK(fake_request_count(f) == 1);
@@ -965,8 +1017,7 @@ static void test_emails_send_batch(void) {
         fake_stop(f);
         return;
     }
-    resend_set_base_url(client, base);
-
+    CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send_batch(client, &batch, &sent);
     CHECK(rc == 0);
     CHECK(fake_request_count(f) == 1);
@@ -1003,8 +1054,7 @@ static void test_emails_send_batch(void) {
         fake_stop(f);
         return;
     }
-    resend_set_base_url(client, base);
-
+    CHECK(resend_set_base_url(client, base) == 0);
     const char *const to[] = {"you@example.com"};
     resend_batch missing = {.count = 1};
     memset(&sent, 0, sizeof sent);
@@ -1053,7 +1103,7 @@ static void test_emails_send_batch(void) {
     resend *bad_key = resend_init("re_test\r\nX-Injected: yes");
     CHECK(bad_key != NULL);
     if (bad_key) {
-        resend_set_base_url(bad_key, base);
+        CHECK(resend_set_base_url(bad_key, base) == 0);
         resend_batch one = {.messages = &injected, .count = 1};
         rc = resend_emails_send_batch(bad_key, &one, &sent);
         CHECK(rc == -1);
@@ -1061,13 +1111,12 @@ static void test_emails_send_batch(void) {
         resend_free(bad_key);
     }
 
-    resend_set_base_url(client, "http://127.0.0.1:1\r\nX: y");
+    CHECK(resend_set_base_url(client, "http://127.0.0.1:1\r\nX: y") == 0);
     resend_batch plain = {.messages = &injected, .count = 1};
     rc = resend_emails_send_batch(client, &plain, &sent);
     CHECK(rc == -1);
     CHECK(fake_request_count(f) == 0);
-    resend_set_base_url(client, base);
-
+    CHECK(resend_set_base_url(client, base) == 0);
     resend_send too_many[101];
     for (size_t i = 0; i < 101; i++)
         too_many[i] = smoke_message(to);
@@ -1091,7 +1140,7 @@ static resend *client_on(fake *f) {
     snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
     resend *client = resend_init("re_test");
     if (client)
-        resend_set_base_url(client, base);
+        CHECK(resend_set_base_url(client, base) == 0);
     return client;
 }
 
@@ -3969,6 +4018,7 @@ static void test_api_keys_update(void) {
 
 int main(void) {
     test_send();
+    test_set_base_url();
     test_error_body();
     test_transport_failure();
     test_body_cap();
