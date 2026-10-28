@@ -4647,6 +4647,975 @@ static void test_api_keys_update(void) {
     fake_stop(f);
 }
 
+/* GET /logs. Page helper, summary fields. Bodies stay NULL when omitted. */
+static void test_logs_list(void) {
+    static const char body[] =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"37e4414c-5e25-4dbc-a071-43552a4bd53b\","
+        "\"created_at\":\"2026-03-30 13:43:54.622865+00\","
+        "\"endpoint\":\"/emails\",\"method\":\"POST\",\"response_status\":200,"
+        "\"user_agent\":\"resend-node:6.0.3\"},"
+        "{\"id\":\"a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d\","
+        "\"created_at\":\"2026-03-30 12:15:00.123456+00\","
+        "\"endpoint\":\"/emails/4ef9a417-02e9-4d39-ad75-9611e0fcc33c\","
+        "\"method\":\"GET\",\"user_agent\":null}"
+        "]}";
+    fake_exchange exchange = {.status = 200, .body = body};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_log_list list = {0};
+    resend_page both = {.after = "a", .before = "b"};
+    memset(&list, 0x5a, sizeof list);
+    int rc = resend_logs_list(client, &both, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(list.items == NULL);
+    CHECK(list.count == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "after and before cannot be combined") == 0);
+
+    CHECK(resend_logs_list(NULL, NULL, &list) == -1);
+    CHECK(resend_logs_list(client, NULL, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_page page = {.after = "cursor-1", .limit = 0};
+    rc = resend_logs_list(client, &page, &list);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/logs?after=cursor-1") == 0);
+    CHECK(list.has_more == 1);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL &&
+          strcmp(list.items[0].id, "37e4414c-5e25-4dbc-a071-43552a4bd53b") == 0);
+    CHECK(list.items[0].created_at != NULL &&
+          strcmp(list.items[0].created_at, "2026-03-30 13:43:54.622865+00") == 0);
+    CHECK(list.items[0].endpoint != NULL && strcmp(list.items[0].endpoint, "/emails") == 0);
+    CHECK(list.items[0].method != NULL && strcmp(list.items[0].method, "POST") == 0);
+    CHECK(list.items[0].response_status == 200);
+    CHECK(list.items[0].user_agent != NULL &&
+          strcmp(list.items[0].user_agent, "resend-node:6.0.3") == 0);
+    CHECK(list.items[0].request_body == NULL);
+    CHECK(list.items[0].response_body == NULL);
+    CHECK(list.items[1].id != NULL &&
+          strcmp(list.items[1].id, "a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d") == 0);
+    CHECK(list.items[1].user_agent == NULL);
+    CHECK(list.items[1].response_status == 0);
+    CHECK(list.items[1].request_body == NULL);
+    CHECK(list.items[1].response_body == NULL);
+    resend_log_list_free(&list);
+    resend_log_list_free(&list);
+    resend_log_list_free(NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_page limited = {.before = "cursor-2", .limit = 5};
+    rc = resend_logs_list(client, &limited, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/logs?before=cursor-2&limit=5") == 0);
+    resend_log_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char empty_body[] = "{\"has_more\":false,\"data\":[]}";
+    fake_exchange empty_ex = {.status = 200, .body = empty_body};
+    f = fake_start(&empty_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_logs_list(client, NULL, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/logs") == 0);
+    CHECK(list.count == 0);
+    CHECK(list.has_more == 0);
+    CHECK(list.items == NULL);
+    resend_log_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"endpoint\":\"/emails\"}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"id\":\"k\",\"response_status\":\"200\"}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":null}"},
+        {.status = 404, .body = "{\"name\":\"not_found\",\"message\":\"Log not found\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 3; i++) {
+        memset(&list, 0x5a, sizeof list);
+        rc = resend_logs_list(client, NULL, &list);
+        CHECK(rc == -1);
+        CHECK(list.items == NULL);
+        CHECK(list.count == 0);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        resend_log_list_free(&list);
+    }
+    CHECK(resend_logs_list(client, NULL, &list) == 0);
+    CHECK(list.count == 0);
+    CHECK(list.has_more == 0);
+    resend_log_list_free(&list);
+    rc = resend_logs_list(client, NULL, &list);
+    CHECK(rc == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->message != NULL && strcmp(err->message, "Log not found") == 0);
+    resend_log_list_free(&list);
+    CHECK(fake_request_count(f) == (int)(sizeof bad / sizeof bad[0]));
+    resend_free(client);
+    fake_stop(f);
+}
+
+/* GET /logs/{id}. Raw request_body and response_body. null stays NULL. */
+static void test_logs_get(void) {
+    static const char id[] = "37e4414c-5e25-4dbc-a071-43552a4bd53b";
+    static const char body[] =
+        "{\"object\":\"log\",\"id\":\"37e4414c-5e25-4dbc-a071-43552a4bd53b\","
+        "\"created_at\":\"2026-03-30 13:43:54.622865+00\","
+        "\"endpoint\":\"/emails\",\"method\":\"POST\",\"response_status\":200,"
+        "\"user_agent\":\"resend-node:6.0.3\","
+        "\"request_body\":{\"from\":\"Acme <onboarding@resend.dev>\","
+        "\"to\":[\"delivered@resend.dev\"],\"subject\":\"Hello World\"},"
+        "\"response_body\":{\"id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\"}}";
+    fake_exchange ok = {.status = 200, .body = body};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_log log = {0};
+    CHECK(resend_logs_get(NULL, id, &log) == -1);
+    CHECK(resend_logs_get(client, NULL, &log) == -1);
+    CHECK(resend_logs_get(client, "", &log) == -1);
+    CHECK(resend_logs_get(client, id, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    memset(&log, 0x5a, sizeof log);
+    int rc = resend_logs_get(client, id, &log);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/logs/37e4414c-5e25-4dbc-a071-43552a4bd53b") == 0);
+    CHECK(log.id != NULL && strcmp(log.id, id) == 0);
+    CHECK(log.endpoint != NULL && strcmp(log.endpoint, "/emails") == 0);
+    CHECK(log.method != NULL && strcmp(log.method, "POST") == 0);
+    CHECK(log.response_status == 200);
+    CHECK(log.user_agent != NULL && strcmp(log.user_agent, "resend-node:6.0.3") == 0);
+    CHECK(log.request_body != NULL &&
+          strcmp(log.request_body, "{\"from\":\"Acme <onboarding@resend.dev>\","
+                                   "\"to\":[\"delivered@resend.dev\"],\"subject\":\"Hello World\"}") ==
+              0);
+    CHECK(log.response_body != NULL &&
+          strcmp(log.response_body, "{\"id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\"}") == 0);
+    resend_log_free(&log);
+    CHECK(log.id == NULL);
+    resend_log_free(&log);
+    resend_log_free(NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char null_bodies[] =
+        "{\"id\":\"37e4414c-5e25-4dbc-a071-43552a4bd53b\","
+        "\"request_body\":null,\"response_body\":null}";
+    fake_exchange null_ex = {.status = 200, .body = null_bodies};
+    f = fake_start(&null_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_logs_get(client, id, &log);
+    CHECK(rc == 0);
+    CHECK(log.request_body == NULL);
+    CHECK(log.response_body == NULL);
+    resend_log_free(&log);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char omitted[] = "{\"id\":\"37e4414c-5e25-4dbc-a071-43552a4bd53b\"}";
+    fake_exchange omit_ex = {.status = 200, .body = omitted};
+    f = fake_start(&omit_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_logs_get(client, id, &log);
+    CHECK(rc == 0);
+    CHECK(log.request_body == NULL);
+    CHECK(log.response_body == NULL);
+    CHECK(log.response_status == 0);
+    resend_log_free(&log);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char raw_values[] =
+        "{\"id\":\"37e4414c-5e25-4dbc-a071-43552a4bd53b\","
+        "\"request_body\":\"not-an-object\",\"response_body\":[1,true,null]}";
+    fake_exchange raw_ex = {.status = 200, .body = raw_values};
+    f = fake_start(&raw_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_logs_get(client, id, &log);
+    CHECK(rc == 0);
+    CHECK(log.request_body != NULL && strcmp(log.request_body, "\"not-an-object\"") == 0);
+    CHECK(log.response_body != NULL && strcmp(log.response_body, "[1,true,null]") == 0);
+    resend_log_free(&log);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_logs_get(client, "a/b c\n?", &log);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/logs/a%2Fb%20c%0A%3F") == 0);
+    resend_log_free(&log);
+    static const char *const dots[] = {".", "..", "%2e", "%2E%2e"};
+    for (size_t i = 0; i < sizeof dots / sizeof dots[0]; i++) {
+        memset(&log, 0, sizeof log);
+        rc = resend_logs_get(client, dots[i], &log);
+        CHECK(rc == -1);
+        CHECK(log.id == NULL);
+        const resend_error *err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 0);
+        CHECK(err->message != NULL && strcmp(err->message, "id cannot be . or ..") == 0);
+    }
+    CHECK(fake_request_count(f) == 1);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "{\"endpoint\":\"/emails\"}"},
+        {.status = 200, .body = "{\"id\":\"x\",\"user_agent\":1}"},
+        {.status = 404, .body = "{\"name\":\"not_found\",\"message\":\"Log not found\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 3; i++) {
+        memset(&log, 0x5a, sizeof log);
+        rc = resend_logs_get(client, id, &log);
+        CHECK(rc == -1);
+        CHECK(log.id == NULL);
+        CHECK(log.request_body == NULL);
+        const resend_error *err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        resend_log_free(&log);
+    }
+    rc = resend_logs_get(client, id, &log);
+    CHECK(rc == -1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->message != NULL && strcmp(err->message, "Log not found") == 0);
+    resend_log_free(&log);
+    CHECK(fake_request_count(f) == 4);
+    resend_free(client);
+    fake_stop(f);
+}
+
+/* GET /suppressions. Page helper, optional origin passed through. */
+static void test_suppressions_list(void) {
+    static const char body[] =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"e169aa45-1ecf-4183-9955-b1499d5701d3\","
+        "\"email\":\"steve.wozniak@example.com\",\"origin\":\"manual\","
+        "\"source_id\":null,\"created_at\":\"2026-10-06 23:47:56.678+00\"},"
+        "{\"id\":\"520784e2-887d-4c25-b53c-4ad46ad38100\","
+        "\"email\":\"susan.kare@example.com\",\"origin\":\"bounce\","
+        "\"source_id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\","
+        "\"created_at\":\"2026-10-07 08:12:03.412+00\"}"
+        "]}";
+    fake_exchange exchange = {.status = 200, .body = body};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_suppression_list list = {0};
+    resend_page both = {.after = "a", .before = "b"};
+    memset(&list, 0x5a, sizeof list);
+    int rc = resend_suppressions_list(client, &both, "bounce", &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(list.items == NULL);
+    CHECK(list.count == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "after and before cannot be combined") == 0);
+
+    CHECK(resend_suppressions_list(NULL, NULL, NULL, &list) == -1);
+    CHECK(resend_suppressions_list(client, NULL, NULL, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_page page = {.after = "cursor-1", .limit = 0};
+    rc = resend_suppressions_list(client, &page, "bounce", &list);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/suppressions?after=cursor-1&origin=bounce") == 0);
+    CHECK(list.has_more == 1);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL &&
+          strcmp(list.items[0].id, "e169aa45-1ecf-4183-9955-b1499d5701d3") == 0);
+    CHECK(list.items[0].email != NULL &&
+          strcmp(list.items[0].email, "steve.wozniak@example.com") == 0);
+    CHECK(list.items[0].origin != NULL && strcmp(list.items[0].origin, "manual") == 0);
+    CHECK(list.items[0].source_id == NULL);
+    CHECK(list.items[0].created_at != NULL &&
+          strcmp(list.items[0].created_at, "2026-10-06 23:47:56.678+00") == 0);
+    CHECK(list.items[0].deleted == 0);
+    CHECK(list.items[1].id != NULL &&
+          strcmp(list.items[1].id, "520784e2-887d-4c25-b53c-4ad46ad38100") == 0);
+    CHECK(list.items[1].origin != NULL && strcmp(list.items[1].origin, "bounce") == 0);
+    CHECK(list.items[1].source_id != NULL &&
+          strcmp(list.items[1].source_id, "4ef9a417-02e9-4d39-ad75-9611e0fcc33c") == 0);
+    resend_suppression_list_free(&list);
+    resend_suppression_list_free(&list);
+    resend_suppression_list_free(NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_list(client, NULL, "complaint", &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/suppressions?origin=complaint") == 0);
+    resend_suppression_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_list(client, NULL, "a b", &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/suppressions?origin=a%20b") == 0);
+    resend_suppression_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char empty_body[] = "{\"has_more\":false,\"data\":[]}";
+    fake_exchange empty_ex = {.status = 200, .body = empty_body};
+    f = fake_start(&empty_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_list(client, NULL, NULL, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/suppressions") == 0);
+    CHECK(list.count == 0);
+    CHECK(list.has_more == 0);
+    CHECK(list.items == NULL);
+    resend_suppression_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"email\":\"a@b.c\"}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":[{\"id\":\"s\",\"source_id\":1}]}"},
+        {.status = 200, .body = "{\"has_more\":false,\"data\":null}"},
+        {.status = 404, .body = "{\"name\":\"not_found\",\"message\":\"Suppression not found\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 3; i++) {
+        memset(&list, 0x5a, sizeof list);
+        rc = resend_suppressions_list(client, NULL, NULL, &list);
+        CHECK(rc == -1);
+        CHECK(list.items == NULL);
+        CHECK(list.count == 0);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 200);
+        resend_suppression_list_free(&list);
+    }
+    CHECK(resend_suppressions_list(client, NULL, NULL, &list) == 0);
+    CHECK(list.count == 0);
+    CHECK(list.has_more == 0);
+    resend_suppression_list_free(&list);
+    rc = resend_suppressions_list(client, NULL, NULL, &list);
+    CHECK(rc == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->message != NULL && strcmp(err->message, "Suppression not found") == 0);
+    resend_suppression_list_free(&list);
+    CHECK(fake_request_count(f) == (int)(sizeof bad / sizeof bad[0]));
+    resend_free(client);
+    fake_stop(f);
+}
+
+static void test_suppressions_get(void) {
+    static const char id[] = "e169aa45-1ecf-4183-9955-b1499d5701d3";
+    static const char body[] =
+        "{\"object\":\"suppression\",\"id\":\"e169aa45-1ecf-4183-9955-b1499d5701d3\","
+        "\"email\":\"steve.wozniak@example.com\",\"origin\":\"bounce\","
+        "\"source_id\":\"4ef9a417-02e9-4d39-ad75-9611e0fcc33c\","
+        "\"created_at\":\"2026-10-06 23:47:56.678+00\"}";
+    fake_exchange ok = {.status = 200, .body = body};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_suppression s = {0};
+    CHECK(resend_suppressions_get(NULL, id, &s) == -1);
+    CHECK(resend_suppressions_get(client, NULL, &s) == -1);
+    CHECK(resend_suppressions_get(client, "", &s) == -1);
+    CHECK(resend_suppressions_get(client, id, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    memset(&s, 0x5a, sizeof s);
+    int rc = resend_suppressions_get(client, id, &s);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/suppressions/e169aa45-1ecf-4183-9955-b1499d5701d3") == 0);
+    CHECK(s.id != NULL && strcmp(s.id, id) == 0);
+    CHECK(s.email != NULL && strcmp(s.email, "steve.wozniak@example.com") == 0);
+    CHECK(s.origin != NULL && strcmp(s.origin, "bounce") == 0);
+    CHECK(s.source_id != NULL && strcmp(s.source_id, "4ef9a417-02e9-4d39-ad75-9611e0fcc33c") == 0);
+    CHECK(s.created_at != NULL && strcmp(s.created_at, "2026-10-06 23:47:56.678+00") == 0);
+    CHECK(s.deleted == 0);
+    resend_suppression_free(&s);
+    resend_suppression_free(&s);
+    resend_suppression_free(NULL);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_get(client, "steve.wozniak@example.com", &s);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/suppressions/steve.wozniak%40example.com") == 0);
+    resend_suppression_free(&s);
+    static const char *const dots[] = {".", "..", "%2e"};
+    for (size_t i = 0; i < sizeof dots / sizeof dots[0]; i++) {
+        memset(&s, 0, sizeof s);
+        rc = resend_suppressions_get(client, dots[i], &s);
+        CHECK(rc == -1);
+        CHECK(s.id == NULL);
+        const resend_error *err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 0);
+        CHECK(err->message != NULL && strcmp(err->message, "id cannot be . or ..") == 0);
+    }
+    CHECK(fake_request_count(f) == 1);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange missing = {
+        .status = 404,
+        .body = "{\"name\":\"not_found\",\"message\":\"Suppression not found\"}",
+    };
+    f = fake_start(&missing, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_get(client, id, &s);
+    CHECK(rc == -1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->message != NULL && strcmp(err->message, "Suppression not found") == 0);
+    resend_suppression_free(&s);
+    resend_free(client);
+    fake_stop(f);
+}
+
+static void test_suppressions_add(void) {
+    static const char created[] =
+        "{\"object\":\"suppression\",\"id\":\"e169aa45-1ecf-4183-9955-b1499d5701d3\"}";
+    fake_exchange ok = {.status = 201, .body = created};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_suppression s = {0};
+    CHECK(resend_suppressions_add(NULL, "a@b.c", &s) == -1);
+    CHECK(resend_suppressions_add(client, "a@b.c", NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    memset(&s, 0x5a, sizeof s);
+    int rc = resend_suppressions_add(client, NULL, &s);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(s.id == NULL);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing email") == 0);
+
+    rc = resend_suppressions_add(client, "", &s);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    rc = resend_suppressions_add(client, "steve.wozniak@example.com", &s);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "POST") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/suppressions") == 0);
+    CHECK(body_eq(f, "{\"email\":\"steve.wozniak@example.com\"}"));
+    CHECK(s.id != NULL && strcmp(s.id, "e169aa45-1ecf-4183-9955-b1499d5701d3") == 0);
+    CHECK(s.email == NULL);
+    CHECK(s.origin == NULL);
+    CHECK(s.deleted == 0);
+    resend_suppression_free(&s);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char id_only[] = "{\"id\":\"e169aa45-1ecf-4183-9955-b1499d5701d3\"}";
+    fake_exchange id_ok = {.status = 201, .body = id_only};
+    f = fake_start(&id_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_add(client, "steve.wozniak@example.com", &s);
+    CHECK(rc == 0);
+    CHECK(s.id != NULL && strcmp(s.id, "e169aa45-1ecf-4183-9955-b1499d5701d3") == 0);
+    CHECK(s.email == NULL);
+    CHECK(s.origin == NULL);
+    CHECK(s.source_id == NULL);
+    CHECK(s.created_at == NULL);
+    CHECK(s.deleted == 0);
+    resend_suppression_free(&s);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 201, .body = "not-json"},
+        {.status = 201, .body = "{\"email\":\"a@b.c\"}"},
+        {.status = 422, .body = "{\"name\":\"validation_error\",\"message\":\"Invalid email\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    for (size_t i = 0; i < 2; i++) {
+        memset(&s, 0x5a, sizeof s);
+        rc = resend_suppressions_add(client, "a@b.c", &s);
+        CHECK(rc == -1);
+        CHECK(s.id == NULL);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 201);
+        resend_suppression_free(&s);
+    }
+    rc = resend_suppressions_add(client, "a@b.c", &s);
+    CHECK(rc == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 422);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+    resend_suppression_free(&s);
+    CHECK(fake_request_count(f) == 3);
+    resend_free(client);
+    fake_stop(f);
+}
+
+static void test_suppressions_remove(void) {
+    static const char id[] = "e169aa45-1ecf-4183-9955-b1499d5701d3";
+    static const char body[] =
+        "{\"object\":\"suppression\",\"id\":\"e169aa45-1ecf-4183-9955-b1499d5701d3\","
+        "\"deleted\":true}";
+    fake_exchange ok = {.status = 200, .body = body};
+    fake *f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_suppression s = {0};
+    CHECK(resend_suppressions_remove(NULL, id, &s) == -1);
+    CHECK(resend_suppressions_remove(client, NULL, &s) == -1);
+    CHECK(resend_suppressions_remove(client, "", &s) == -1);
+    CHECK(resend_suppressions_remove(client, id, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    int rc = resend_suppressions_remove(client, id, &s);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "DELETE") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/suppressions/e169aa45-1ecf-4183-9955-b1499d5701d3") == 0);
+    CHECK(fake_body(f) == NULL || fake_body(f)[0] == '\0');
+    CHECK(s.id != NULL && strcmp(s.id, id) == 0);
+    CHECK(s.deleted == 1);
+    resend_suppression_free(&s);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_remove(client, "steve.wozniak@example.com", &s);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/suppressions/steve.wozniak%40example.com") == 0);
+    CHECK(s.deleted == 1);
+    resend_suppression_free(&s);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char not_deleted[] =
+        "{\"object\":\"suppression\",\"id\":\"e169aa45-1ecf-4183-9955-b1499d5701d3\","
+        "\"deleted\":false}";
+    fake_exchange still = {.status = 200, .body = not_deleted};
+    f = fake_start(&still, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_remove(client, id, &s);
+    CHECK(rc == 0);
+    CHECK(s.id != NULL && strcmp(s.id, id) == 0);
+    CHECK(s.deleted == 0);
+    resend_suppression_free(&s);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange missing = {
+        .status = 404,
+        .body = "{\"name\":\"not_found\",\"message\":\"Suppression not found\"}",
+    };
+    f = fake_start(&missing, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    rc = resend_suppressions_remove(client, id, &s);
+    CHECK(rc == -1);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->message != NULL && strcmp(err->message, "Suppression not found") == 0);
+    resend_suppression_free(&s);
+    resend_free(client);
+    fake_stop(f);
+}
+
+static void test_suppressions_batch(void) {
+    static const char added[] =
+        "{\"data\":["
+        "{\"object\":\"suppression\",\"id\":\"e169aa45-1ecf-4183-9955-b1499d5701d3\"},"
+        "{\"object\":\"suppression\",\"id\":\"520784e2-887d-4c25-b53c-4ad46ad38100\"}"
+        "]}";
+    fake_exchange add_ok = {.status = 201, .body = added};
+    fake *f = fake_start(&add_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    const char *const emails[] = {"steve.wozniak@example.com", "susan.kare@example.com"};
+    resend_suppression_list list = {0};
+    CHECK(resend_suppressions_add_batch(NULL, emails, 2, &list) == -1);
+    CHECK(resend_suppressions_add_batch(client, emails, 2, NULL) == -1);
+
+    memset(&list, 0x5a, sizeof list);
+    int rc = resend_suppressions_add_batch(client, emails, 0, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(list.items == NULL);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL && strcmp(err->message, "batch count below 1") == 0);
+
+    rc = resend_suppressions_add_batch(client, emails, 101, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "batch count above 100") == 0);
+
+    rc = resend_suppressions_add_batch(client, NULL, 2, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "missing batch emails") == 0);
+
+    rc = resend_suppressions_add_batch(client, emails, 2, &list);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "POST") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/suppressions/batch/add") == 0);
+    CHECK(body_eq(f, "{\"emails\":[\"steve.wozniak@example.com\",\"susan.kare@example.com\"]}"));
+    CHECK(list.has_more == 0);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL &&
+          strcmp(list.items[0].id, "e169aa45-1ecf-4183-9955-b1499d5701d3") == 0);
+    CHECK(list.items[0].email == NULL);
+    CHECK(list.items[1].id != NULL &&
+          strcmp(list.items[1].id, "520784e2-887d-4c25-b53c-4ad46ad38100") == 0);
+    resend_suppression_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    static const char removed[] =
+        "{\"data\":["
+        "{\"object\":\"suppression\",\"id\":\"e169aa45-1ecf-4183-9955-b1499d5701d3\","
+        "\"deleted\":true}"
+        "]}";
+    fake_exchange rm_ok = {.status = 200, .body = removed};
+    f = fake_start(&rm_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    const char *const ids[] = {"e169aa45-1ecf-4183-9955-b1499d5701d3"};
+    resend_suppression_batch_remove both = {
+        .emails = emails,
+        .email_count = 2,
+        .ids = ids,
+        .id_count = 1,
+    };
+    memset(&list, 0x5a, sizeof list);
+    rc = resend_suppressions_remove_batch(client, &both, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    CHECK(list.items == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "emails and ids cannot be combined") == 0);
+
+    resend_suppression_batch_remove empty = {0};
+    rc = resend_suppressions_remove_batch(client, &empty, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "missing batch emails or ids") == 0);
+
+    CHECK(resend_suppressions_remove_batch(NULL, &empty, &list) == -1);
+    CHECK(resend_suppressions_remove_batch(client, NULL, &list) == -1);
+    CHECK(resend_suppressions_remove_batch(client, &empty, NULL) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    const char *const many[101] = {0};
+    resend_suppression_batch_remove too_many = {.ids = many, .id_count = 101};
+    rc = resend_suppressions_remove_batch(client, &too_many, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL &&
+          strcmp(err->message, "batch count above 100") == 0);
+
+    resend_suppression_batch_remove missing_ids = {.id_count = 1};
+    rc = resend_suppressions_remove_batch(client, &missing_ids, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->message != NULL && strcmp(err->message, "missing batch ids") == 0);
+
+    resend_suppression_batch_remove by_id = {.ids = ids, .id_count = 1};
+    rc = resend_suppressions_remove_batch(client, &by_id, &list);
+    CHECK(rc == 0);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "POST") == 0);
+    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/suppressions/batch/remove") == 0);
+    CHECK(body_eq(f, "{\"ids\":[\"e169aa45-1ecf-4183-9955-b1499d5701d3\"]}"));
+    CHECK(list.has_more == 0);
+    CHECK(list.count == 1);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL &&
+          strcmp(list.items[0].id, "e169aa45-1ecf-4183-9955-b1499d5701d3") == 0);
+    CHECK(list.items[0].deleted == 1);
+    resend_suppression_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&rm_ok, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_suppression_batch_remove by_email = {.emails = emails, .email_count = 2};
+    rc = resend_suppressions_remove_batch(client, &by_email, &list);
+    CHECK(rc == 0);
+    CHECK(body_eq(f, "{\"emails\":[\"steve.wozniak@example.com\",\"susan.kare@example.com\"]}"));
+    CHECK(list.items[0].deleted == 1);
+    resend_suppression_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+}
+
 int main(void) {
     test_send();
     test_set_base_url();
@@ -4690,6 +5659,13 @@ int main(void) {
     test_api_keys_list();
     test_api_keys_update();
     test_api_keys_remove();
+    test_logs_list();
+    test_logs_get();
+    test_suppressions_list();
+    test_suppressions_get();
+    test_suppressions_add();
+    test_suppressions_remove();
+    test_suppressions_batch();
     if (failures != 0) {
         fprintf(stderr, "%d failure%s\n", failures, failures == 1 ? "" : "s");
         return 1;

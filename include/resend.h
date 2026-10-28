@@ -376,6 +376,76 @@ int resend_api_keys_remove(resend *client, const char *api_key_id);
 void resend_api_key_free(resend_api_key *key);
 void resend_api_key_list_free(resend_api_key_list *list);
 
+/* ---- logs -------------------------------------------------------------- */
+
+/*
+ * List fills id, created_at, endpoint, method, response_status, and
+ * user_agent. Get also fills request_body and response_body as the raw JSON
+ * value. Missing or null bodies stay NULL.
+ */
+typedef struct {
+    char *id;
+    char *created_at;
+    char *endpoint;
+    char *method;        /* "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", ... */
+    int response_status; /* 0 when missing or null */
+    char *user_agent;    /* NULL when omitted or null */
+    char *request_body;  /* raw JSON; NULL on list, and when get sent null */
+    char *response_body;
+} resend_log;
+
+typedef struct {
+    resend_log *items;
+    size_t count;
+    int has_more;
+} resend_log_list;
+
+int resend_logs_list(resend *client, const resend_page *page, resend_log_list *out);
+/* 64 MiB cap. 30s total timeout. */
+int resend_logs_get(resend *client, const char *log_id, resend_log *out);
+
+void resend_log_free(resend_log *log);
+void resend_log_list_free(resend_log_list *list);
+
+/* ---- suppressions ------------------------------------------------------ */
+
+typedef struct {
+    char *id;
+    char *email;
+    char *origin;      /* "bounce", "complaint", "manual"; NULL when omitted */
+    char *source_id;   /* NULL for manual, and whenever the API sent null */
+    char *created_at;
+    int deleted;       /* 1 only when the API sent true */
+} resend_suppression;
+
+typedef struct {
+    resend_suppression *items;
+    size_t count;
+    int has_more;
+} resend_suppression_list;
+
+/* Exactly one of emails or ids. Count 1..100. */
+typedef struct {
+    const char *const *emails;
+    size_t email_count;
+    const char *const *ids;
+    size_t id_count;
+} resend_suppression_batch_remove;
+
+int resend_suppressions_add(resend *client, const char *email, resend_suppression *out);
+int resend_suppressions_list(resend *client, const resend_page *page, const char *origin,
+                             resend_suppression_list *out);
+/* suppression is an id or an email. */
+int resend_suppressions_get(resend *client, const char *suppression, resend_suppression *out);
+int resend_suppressions_remove(resend *client, const char *suppression, resend_suppression *out);
+int resend_suppressions_add_batch(resend *client, const char *const *emails, size_t count,
+                                  resend_suppression_list *out);
+int resend_suppressions_remove_batch(resend *client, const resend_suppression_batch_remove *req,
+                                     resend_suppression_list *out);
+
+void resend_suppression_free(resend_suppression *suppression);
+void resend_suppression_list_free(resend_suppression_list *list);
+
 #ifdef __cplusplus
 }
 #endif

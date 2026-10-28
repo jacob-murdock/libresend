@@ -117,6 +117,12 @@ int resend_attachment_get(resend *client, const char *prefix, const char *email_
  * *out is malloc'd.
  */
 int resend_path_with_page(resend *client, const char *prefix, const resend_page *page, char **out);
+/*
+ * Append key=value to a path from resend_path_with_page. value is percent-encoded.
+ * ? when the path has no query yet, otherwise &. NULL value is a no-op.
+ * *path is replaced on success.
+ */
+int resend_path_append_query(resend *client, char **path, const char *key, const char *value);
 
 /*
  * prefix + one percent-encoded path segment + optional suffix (NULL omits it).

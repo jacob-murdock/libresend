@@ -2,7 +2,7 @@
 
 Unofficial C client for the [Resend](https://resend.com) API. Not a Resend product, and not affiliated.
 
-[Official SDKs](https://resend.com/docs/sdks) cover Node.js, PHP, Python, Ruby, Go, Java, Rust, and .NET. There is no official C SDK. This library is the part a C program needs: send mail, read what was sent, verify a webhook, read mail Resend received, and manage the domains and API keys that mail depends on.
+[Official SDKs](https://resend.com/docs/sdks) cover Node.js, PHP, Python, Ruby, Go, Java, Rust, and .NET. There is no official C SDK. This library is the part a C program needs: send mail, read what was sent, verify a webhook, read mail Resend received, and manage the domains, API keys, logs, and suppressions that mail depends on.
 
 The interface is [`include/resend.h`](include/resend.h). Names follow the [Resend API](https://resend.com/docs/api-reference/introduction) and [resend-openapi](https://github.com/resend/resend-openapi). Calls land in that order.
 
@@ -86,6 +86,14 @@ resend_event_free(&event);
 
 `resend_api_keys_create` takes `full_access` or `sending_access`. A sending key can be limited to one `domain_id`. `token` is present only on create. `resend_api_keys_update` renames a key; the response is only its id.
 
+## Logs
+
+`resend_logs_list` pages through recent API requests. `resend_logs_get` is the same record plus `request_body` and `response_body` as the raw JSON the API stored. A missing `response_status` is 0. `user_agent` is NULL when omitted.
+
+## Suppressions
+
+`resend_suppressions_add` takes an email. List can pass `origin` (`bounce`, `complaint`, `manual`); the client does not check the value. Get and remove take an id or an email. Batch add and batch remove take up to 100 addresses. Remove batch is emails or ids, not both. `source_id` is the email that bounced or complained, and NULL for a manual suppression.
+
 ## Calls
 
 Lists take a `resend_page` (`after`, `before`, `limit`). NULL omits pagination. `after` and `before` cannot be combined. `limit` 0 omits the parameter. The API maximum is 100.
@@ -97,6 +105,8 @@ Lists take a `resend_page` (`after`, `before`, `limit`). NULL omits pagination. 
 | Webhooks | `resend_webhook_verify` |
 | Domains | `resend_domains_create`, `resend_domains_get`, `resend_domains_list`, `resend_domains_verify`, `resend_domains_update`, `resend_domains_remove` |
 | API keys | `resend_api_keys_create`, `resend_api_keys_list`, `resend_api_keys_update`, `resend_api_keys_remove` |
+| Logs | `resend_logs_list`, `resend_logs_get` |
+| Suppressions | `resend_suppressions_add`, `resend_suppressions_list`, `resend_suppressions_get`, `resend_suppressions_remove`, `resend_suppressions_add_batch`, `resend_suppressions_remove_batch` |
 
 ## Contract
 
@@ -109,8 +119,7 @@ The API is larger than this library. What is here is the transactional path. The
 | Area | Status |
 | --- | --- |
 | Emails, batch, receiving, attachments, webhook verify | Supported |
-| Domains, API keys | Supported |
-| Logs, suppressions | Not yet |
+| Domains, API keys, logs, suppressions | Supported |
 | Contacts, segments, topics, contact properties, broadcasts, templates | Not yet |
 | Automations, events, Inboxes, share links, domain claims, webhook endpoint management | Not yet |
 

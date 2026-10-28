@@ -81,6 +81,28 @@ oom:
     return -1;
 }
 
+int resend_path_append_query(resend *client, char **path, const char *key, const char *value) {
+    if (!client || !path || !*path || !key)
+        return -1;
+    if (!value)
+        return 0;
+
+    resend_buf b;
+    resend_buf_init(&b);
+    if (resend_buf_puts(&b, *path) != 0)
+        goto oom;
+    int first = strchr(*path, '?') == NULL;
+    if (query_param(&b, &first, key, value) != 0 || !b.data)
+        goto oom;
+    free(*path);
+    *path = b.data;
+    return 0;
+oom:
+    resend_buf_free(&b);
+    resend_error_set(client, 0, NULL, "out of memory");
+    return -1;
+}
+
 /* Literal `.` and `..` are the real risk: dot is unreserved, so put_pct
  * leaves them as a path segment. `%2e` becomes `%252e` and cannot decode
  * to a dot here; that part is defensive, matching Node. */
