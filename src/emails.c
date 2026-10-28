@@ -403,18 +403,19 @@ static int parse_email(const char *json, size_t len, resend_email *out) {
     return 0;
 }
 
-int resend_emails_get(resend *client, const char *email_id, resend_email *out) {
+static int email_by_id(resend *client, const char *method, const char *email_id, const char *suffix,
+                       resend_email *out) {
     if (!client || !email_id || !email_id[0] || !out)
         return -1;
     resend_error_clear(client);
     memset(out, 0, sizeof *out);
 
     char *path = NULL;
-    if (resend_path_with_id(client, "/emails/", email_id, NULL, &path) != 0)
+    if (resend_path_with_id(client, "/emails/", email_id, suffix, &path) != 0)
         return -1;
 
     resend_http_response resp;
-    if (resend_http_json(client, "GET", path, NULL, NULL, &resp) != 0) {
+    if (resend_http_json(client, method, path, NULL, NULL, &resp) != 0) {
         free(path);
         return -1;
     }
@@ -436,6 +437,10 @@ int resend_emails_get(resend *client, const char *email_id, resend_email *out) {
     }
     resend_http_response_free(&resp);
     return 0;
+}
+
+int resend_emails_get(resend *client, const char *email_id, resend_email *out) {
+    return email_by_id(client, "GET", email_id, NULL, out);
 }
 
 void resend_email_list_free(resend_email_list *list) {
@@ -510,38 +515,7 @@ fail:
 }
 
 int resend_emails_cancel(resend *client, const char *email_id, resend_email *out) {
-    if (!client || !email_id || !email_id[0] || !out)
-        return -1;
-    resend_error_clear(client);
-    memset(out, 0, sizeof *out);
-
-    char *path = NULL;
-    if (resend_path_with_id(client, "/emails/", email_id, "/cancel", &path) != 0)
-        return -1;
-
-    resend_http_response resp;
-    if (resend_http_json(client, "POST", path, NULL, NULL, &resp) != 0) {
-        free(path);
-        return -1;
-    }
-    free(path);
-
-    if (resp.status < 200 || resp.status >= 300) {
-        size_t len = resp.body.data ? resp.body.len : 0;
-        resend_error_from_body(client, (int)resp.status, resp.body.data, len);
-        resend_http_response_free(&resp);
-        return -1;
-    }
-
-    size_t len = resp.body.data ? resp.body.len : 0;
-    if (parse_email(resp.body.data ? resp.body.data : "", len, out) != 0) {
-        resend_email_free(out);
-        resend_error_set(client, (int)resp.status, NULL, "invalid email");
-        resend_http_response_free(&resp);
-        return -1;
-    }
-    resend_http_response_free(&resp);
-    return 0;
+    return email_by_id(client, "POST", email_id, "/cancel", out);
 }
 
 int resend_emails_list(resend *client, const resend_page *page, resend_email_list *out) {
