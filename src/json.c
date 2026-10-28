@@ -1,10 +1,18 @@
 #include "internal.h"
 
-#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* RFC 8259 whitespace only. Locale isspace would also accept form feed and vertical tab. */
+static int json_is_ws(unsigned char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+static int json_is_alnum(unsigned char c) {
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
 
 int resend_json_object_begin(resend_buf *b) { return resend_buf_putc(b, '{'); }
 int resend_json_object_end(resend_buf *b) { return resend_buf_putc(b, '}'); }
@@ -101,7 +109,7 @@ int resend_json_tag_array(resend_buf *b, const resend_pair *tags, size_t count) 
 }
 
 const char *resend_json_skip_ws(const char *p, const char *end) {
-    while (p < end && isspace((unsigned char)*p))
+    while (p < end && json_is_ws((unsigned char)*p))
         p++;
     return p;
 }
@@ -294,7 +302,7 @@ static int skip_lit(const char *p, const char *end, const char *lit, const char 
         return -1;
     if (p + n < end) {
         unsigned char c = (unsigned char)p[n];
-        if (c == '_' || isalnum(c))
+        if (c == '_' || json_is_alnum(c))
             return -1;
     }
     *next = p + n;
@@ -394,7 +402,7 @@ static int walk_object(const char *p, const char *end, const char *key, const ch
         const char *start = p;
         if (skip_value(p, end, &p, depth + 1) != 0 || p == start)
             return -1;
-        if (want && !found) {
+        if (want) {
             found = 1;
             found_val = start;
             found_end = p;

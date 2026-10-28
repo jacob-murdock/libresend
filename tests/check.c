@@ -2041,6 +2041,8 @@ static void test_emails_get_bad(void) {
         {.status = 200, .body = "{\"id\":\"x\",\"subject\":\"a\nb\"}"},
         {.status = 200, .body = "{\"id\":\"x\",\"to\":[\"a\",]}"},
         {.status = 200, .body = "{\"id\":\"x\",\"html\":truefoo}"},
+        /* Form feed is isspace in C, not JSON whitespace. */
+        {.status = 200, .body = "{\f\"id\":\"x\"}"},
     };
     fake *f = fake_start(script, sizeof script / sizeof script[0]);
     CHECK(f != NULL);
@@ -2160,7 +2162,8 @@ static char *sign_v1(const char *secret, const char *svix_id, long ts, const voi
 }
 
 /* C strings cannot hold U+0000. The reader stores U+FFFD so a skipped field,
- * a stored field, or one email in a list does not fail the call. */
+ * a stored field, or one email in a list does not fail the call.
+ * A repeated key keeps the last value. */
 static void test_json_nul(void) {
     static const char skipped[] = "{\"id\":\"x\",\"other\":\"\\u0000\"}";
     static const char stored[] = "{\"id\":\"x\",\"subject\":\"hi\\u0000there\"}";
@@ -2169,10 +2172,12 @@ static void test_json_nul(void) {
         "{\"id\":\"a\"},"
         "{\"id\":\"b\",\"html\":\"x\\u0000y\"}"
         "]}";
+    static const char dup[] = "{\"id\":\"first\",\"id\":\"last\"}";
     fake_exchange script[] = {
         {.status = 200, .body = skipped},
         {.status = 200, .body = stored},
         {.status = 200, .body = page},
+        {.status = 200, .body = dup},
     };
     fake *f = fake_start(script, sizeof script / sizeof script[0]);
     CHECK(f != NULL);
@@ -2206,7 +2211,12 @@ static void test_json_nul(void) {
     CHECK(list.items[1].html != NULL && strcmp(list.items[1].html, "x\xEF\xBF\xBDy") == 0);
     resend_email_list_free(&list);
 
-    CHECK(fake_request_count(f) == 3);
+    rc = resend_emails_get(client, "x", &email);
+    CHECK(rc == 0);
+    CHECK(email.id != NULL && strcmp(email.id, "last") == 0);
+    resend_email_free(&email);
+
+    CHECK(fake_request_count(f) == 4);
     resend_free(client);
     fake_stop(f);
 }
@@ -2428,6 +2438,26 @@ static void test_webhook_verify(void) {
           strcmp(event.data_json,
                  "{\"created_at\":\"inner\",\"nested\":{\"email_id\":\"nested-id\"},"
                  "\"email_id\":\"real-id\"}") == 0);
+    resend_event_free(&event);
+    free(sig);
+
+    /* Repeated email_id: last wins; data_json keeps both. */
+    static const char dup_body[] =
+        "{\"type\":\"email.sent\",\"created_at\":\"t\","
+        "\"data\":{\"email_id\":\"first\",\"email_id\":\"last\"}}";
+    now = (long)time(NULL);
+    sig = sign_v1(secret, svix_id, now, dup_body, strlen(dup_body));
+    CHECK(sig != NULL);
+    if (!sig)
+        return;
+    snprintf(ts, sizeof ts, "%ld", now);
+    memset(&event, 0, sizeof event);
+    memset(&err, 0, sizeof err);
+    rc = resend_webhook_verify(secret, svix_id, ts, sig, dup_body, strlen(dup_body), &event, &err);
+    CHECK(rc == 0);
+    CHECK(event.email_id != NULL && strcmp(event.email_id, "last") == 0);
+    CHECK(event.data_json != NULL &&
+          strcmp(event.data_json, "{\"email_id\":\"first\",\"email_id\":\"last\"}") == 0);
     resend_event_free(&event);
     free(sig);
 
