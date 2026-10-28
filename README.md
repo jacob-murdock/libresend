@@ -102,11 +102,17 @@ Lists take a `resend_page` (`after`, `before`, `limit`). NULL omits pagination. 
 
 Request pointers belong to the caller for the length of the call. A result belongs to the caller until the matching `*_free`. One client is not shared across threads. `resend_last_error` lasts until the next call on that client. Webhook verify has no client, so it writes `resend_error` itself.
 
-## Later
+## Scope
 
-Contacts, segments, broadcasts, templates, topics, and Inboxes. Also later: share links, domain claims, and webhook endpoint management.
+The API is larger than this library. What is here is the transactional path. The rest is not started, and pull requests are welcome.
 
-A daemon that stores received mail is a separate project. It can link this library once send and receiving work.
+| Area | Status |
+| --- | --- |
+| Emails, batch, receiving, attachments, webhook verify | Supported |
+| Domains, API keys | Supported |
+| Logs, suppressions | Not yet |
+| Contacts, segments, topics, contact properties, broadcasts, templates | Not yet |
+| Automations, events, Inboxes, share links, domain claims, webhook endpoint management | Not yet |
 
 ## License
 
