@@ -111,7 +111,10 @@ enum { JSON_MAX_DEPTH = 64 };
 static int put_utf8(resend_buf *b, unsigned int cp) {
     unsigned char tmp[4];
     size_t n;
-    if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
+    /* C strings cannot hold U+0000. U+FFFD is the usual stand-in. */
+    if (cp == 0)
+        return resend_buf_puts(b, "\xEF\xBF\xBD");
+    if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))
         return -1;
     if (cp < 0x80) {
         tmp[0] = (unsigned char)cp;
@@ -154,6 +157,27 @@ static int parse_hex4(const char **p, const char *end, unsigned int *out) {
     *p += 4;
     *out = cp;
     return 0;
+}
+
+/* One \uXXXX, plus a low surrogate when this is a high surrogate. b NULL skips. */
+static int take_unicode_escape(const char **p, const char *end, resend_buf *b) {
+    unsigned int cp = 0;
+    if (parse_hex4(p, end, &cp) != 0)
+        return -1;
+    if (cp >= 0xD800 && cp <= 0xDBFF) {
+        if ((size_t)(end - *p) < 6 || (*p)[0] != '\\' || (*p)[1] != 'u')
+            return -1;
+        *p += 2;
+        unsigned int low = 0;
+        if (parse_hex4(p, end, &low) != 0 || low < 0xDC00 || low > 0xDFFF)
+            return -1;
+        cp = 0x10000u + (((cp - 0xD800u) << 10) | (low - 0xDC00u));
+    } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+        return -1;
+    }
+    if (!b)
+        return 0;
+    return put_utf8(b, cp);
 }
 
 int json_parse_string(const char *p, const char *end, char **out, const char **next) {
@@ -203,34 +227,12 @@ int json_parse_string(const char *p, const char *end, char **out, const char **n
             case 't':
                 c = '\t';
                 break;
-            case 'u': {
-                unsigned int cp = 0;
-                if (parse_hex4(&p, end, &cp) != 0) {
-                    resend_buf_free(&b);
-                    return -1;
-                }
-                if (cp >= 0xD800 && cp <= 0xDBFF) {
-                    if ((size_t)(end - p) < 6 || p[0] != '\\' || p[1] != 'u') {
-                        resend_buf_free(&b);
-                        return -1;
-                    }
-                    p += 2;
-                    unsigned int low = 0;
-                    if (parse_hex4(&p, end, &low) != 0 || low < 0xDC00 || low > 0xDFFF) {
-                        resend_buf_free(&b);
-                        return -1;
-                    }
-                    cp = 0x10000u + (((cp - 0xD800u) << 10) | (low - 0xDC00u));
-                } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
-                    resend_buf_free(&b);
-                    return -1;
-                }
-                if (put_utf8(&b, cp) != 0) {
+            case 'u':
+                if (take_unicode_escape(&p, end, &b) != 0) {
                     resend_buf_free(&b);
                     return -1;
                 }
                 continue;
-            }
             default:
                 resend_buf_free(&b);
                 return -1;
@@ -249,11 +251,41 @@ int json_parse_string(const char *p, const char *end, char **out, const char **n
 }
 
 static int skip_string(const char *p, const char *end, const char **next) {
-    char *tmp = NULL;
-    if (json_parse_string(p, end, &tmp, next) != 0)
+    if (p >= end || *p != '"')
         return -1;
-    free(tmp);
-    return 0;
+    p++;
+    while (p < end) {
+        unsigned char c = (unsigned char)*p++;
+        if (c == '"') {
+            *next = p;
+            return 0;
+        }
+        if (c == '\\') {
+            if (p >= end)
+                return -1;
+            unsigned char e = (unsigned char)*p++;
+            switch (e) {
+            case '"':
+            case '\\':
+            case '/':
+            case 'b':
+            case 'f':
+            case 'n':
+            case 'r':
+            case 't':
+                break;
+            case 'u':
+                if (take_unicode_escape(&p, end, NULL) != 0)
+                    return -1;
+                break;
+            default:
+                return -1;
+            }
+        } else if (c < 0x20) {
+            return -1;
+        }
+    }
+    return -1;
 }
 
 static int skip_lit(const char *p, const char *end, const char *lit, const char **next) {

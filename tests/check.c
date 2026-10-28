@@ -1315,7 +1315,6 @@ static void test_emails_get_bad(void) {
     static const fake_exchange script[] = {
         {.status = 200, .body = "not-json"},
         {.status = 200, .body = "{\"id\":\"x\",\"subject\":\"\\uD800\"}"},
-        {.status = 200, .body = "{\"id\":\"x\",\"subject\":\"hi\\u0000\"}"},
         {.status = 200, .body = "{\"subject\":\"no id\"}"},
         {.status = 200, .body = "{\"id\":\"x\",\"subject\":\"a\nb\"}"},
         {.status = 200, .body = "{\"id\":\"x\",\"to\":[\"a\",]}"},
@@ -1436,6 +1435,58 @@ static char *sign_v1(const char *secret, const char *svix_id, long ts, const voi
     snprintf(out, out_len + 1, "v1,%s", b64_sig);
     free(b64_sig);
     return out;
+}
+
+/* C strings cannot hold U+0000. The reader stores U+FFFD so a skipped field,
+ * a stored field, or one email in a list does not fail the call. */
+static void test_json_nul(void) {
+    static const char skipped[] = "{\"id\":\"x\",\"other\":\"\\u0000\"}";
+    static const char stored[] = "{\"id\":\"x\",\"subject\":\"hi\\u0000there\"}";
+    static const char page[] =
+        "{\"has_more\":false,\"data\":["
+        "{\"id\":\"a\"},"
+        "{\"id\":\"b\",\"html\":\"x\\u0000y\"}"
+        "]}";
+    fake_exchange script[] = {
+        {.status = 200, .body = skipped},
+        {.status = 200, .body = stored},
+        {.status = 200, .body = page},
+    };
+    fake *f = fake_start(script, sizeof script / sizeof script[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_email email = {0};
+    int rc = resend_emails_get(client, "x", &email);
+    CHECK(rc == 0);
+    CHECK(email.id != NULL && strcmp(email.id, "x") == 0);
+    resend_email_free(&email);
+
+    rc = resend_emails_get(client, "x", &email);
+    CHECK(rc == 0);
+    CHECK(email.subject != NULL && strcmp(email.subject, "hi\xEF\xBF\xBDthere") == 0);
+    resend_email_free(&email);
+
+    resend_email_list list = {0};
+    rc = resend_emails_list(client, NULL, &list);
+    CHECK(rc == 0);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL && strcmp(list.items[0].id, "a") == 0);
+    CHECK(list.items[1].id != NULL && strcmp(list.items[1].id, "b") == 0);
+    CHECK(list.items[1].html != NULL && strcmp(list.items[1].html, "x\xEF\xBF\xBDy") == 0);
+    resend_email_list_free(&list);
+
+    CHECK(fake_request_count(f) == 3);
+    resend_free(client);
+    fake_stop(f);
 }
 
 static void test_webhook_verify(void) {
@@ -4038,6 +4089,7 @@ int main(void) {
     test_emails_list_query();
     test_emails_list_bad();
     test_emails_get_bad();
+    test_json_nul();
     test_webhook_verify();
     test_receiving_get();
     test_receiving_list();
