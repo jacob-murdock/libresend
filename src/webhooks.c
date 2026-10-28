@@ -5,6 +5,7 @@
 #include <openssl/hmac.h>
 
 #include <limits.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -126,21 +127,26 @@ static int parse_timestamp(const char *s, long *out) {
 }
 
 static int secret_key(const char *secret, unsigned char **key, size_t *key_len) {
-    if (!secret || strncmp(secret, "whsec_", 6) != 0 || !secret[6])
+    if (!secret || !secret[0])
         return -1;
-    return b64_decode(secret + 6, key, key_len);
+    if (strncmp(secret, "whsec_", 6) == 0)
+        secret += 6;
+    if (!secret[0])
+        return -1;
+    return b64_decode(secret, key, key_len);
 }
 
+/* 0 ok, -1 out of memory, -2 length or HMAC failure. */
 static int expected_sig(const unsigned char *key, size_t key_len, const char *svix_id,
                         const char *svix_timestamp, const void *body, size_t body_len,
                         char **out_b64) {
     if (key_len == 0 || key_len > (size_t)INT_MAX)
-        return -1;
+        return -2;
     size_t id_len = strlen(svix_id);
     size_t ts_len = strlen(svix_timestamp);
     if (id_len > SIZE_MAX - 2 || ts_len > SIZE_MAX - 2 - id_len ||
         body_len > SIZE_MAX - 2 - id_len - ts_len)
-        return -1;
+        return -2;
     size_t signed_len = id_len + 1 + ts_len + 1 + body_len;
     unsigned char *signed_content = malloc(signed_len);
     if (!signed_content)
@@ -158,8 +164,8 @@ static int expected_sig(const unsigned char *key, size_t key_len, const char *sv
         HMAC(EVP_sha256(), key, (int)key_len, signed_content, signed_len, md, &md_len);
     free(signed_content);
     if (!ok || md_len != 32)
-        return -1;
-    return b64_encode(md, md_len, out_b64);
+        return -2;
+    return b64_encode(md, md_len, out_b64) == 0 ? 0 : -1;
 }
 
 /* True when any space-separated v1,<sig> matches expected (constant-time per value). */
@@ -282,9 +288,10 @@ int resend_webhook_verify(const char *secret, const char *svix_id, const char *s
     }
 
     char *expected = NULL;
-    if (expected_sig(key, key_len, svix_id, svix_timestamp, body, body_len, &expected) != 0) {
+    int sig_rc = expected_sig(key, key_len, svix_id, svix_timestamp, body, body_len, &expected);
+    if (sig_rc != 0) {
         free_key(key, key_len);
-        webhook_err(err, "out of memory");
+        webhook_err(err, sig_rc == -1 ? "out of memory" : "failed to compute signature");
         return -1;
     }
     free_key(key, key_len);

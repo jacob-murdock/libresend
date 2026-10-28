@@ -245,13 +245,13 @@ void resend_received_attachment_list_free(resend_received_attachment_list *list)
 
 typedef struct {
     char *type;        /* "email.received", "email.sent", ... */
-    char *created_at;  /* the event timestamp, not data.created_at */
-    char *email_id;    /* set when the event carries one */
-    char *data_json;   /* the "data" object, for fields this struct does not lift */
+    char *created_at;  /* NULL if omitted; the event timestamp, not data.created_at */
+    char *email_id;    /* NULL if the event has none */
+    char *data_json;   /* NULL if data is omitted; otherwise the "data" object */
 } resend_event;
 
 /*
- * secret is the signing secret, including the "whsec_" prefix.
+ * secret is the signing secret. A "whsec_" prefix is stripped when present.
  * svix_signature may contain more than one space-separated "v1," value.
  * Rejects a timestamp outside five minutes of now. Callers that need
  * once-only delivery record svix ids themselves.

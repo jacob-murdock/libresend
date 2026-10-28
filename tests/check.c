@@ -1637,6 +1637,21 @@ static void test_webhook_verify(void) {
     resend_event_free(&event);
     free(sig);
 
+    /* Prefix is optional; Svix and the other SDKs strip it when present. */
+    now = (long)time(NULL);
+    sig = sign_v1(secret, svix_id, now, body, strlen(body));
+    CHECK(sig != NULL);
+    if (!sig)
+        return;
+    snprintf(ts, sizeof ts, "%ld", now);
+    memset(&event, 0, sizeof event);
+    memset(&err, 0, sizeof err);
+    rc = resend_webhook_verify(secret + 6, svix_id, ts, sig, body, strlen(body), &event, &err);
+    CHECK(rc == 0);
+    CHECK(event.type != NULL && strcmp(event.type, "email.sent") == 0);
+    resend_event_free(&event);
+    free(sig);
+
     /* No email_id in data → email_id stays NULL; data_json still filled. */
     static const char domain_body[] =
         "{\"type\":\"domain.created\",\"created_at\":\"2024-03-01T00:00:00.000Z\","
@@ -1657,6 +1672,25 @@ static void test_webhook_verify(void) {
     CHECK(event.email_id == NULL);
     CHECK(event.data_json != NULL &&
           strcmp(event.data_json, "{\"id\":\"d_1\",\"name\":\"example.com\"}") == 0);
+    resend_event_free(&event);
+    free(sig);
+
+    /* created_at, email_id, and data_json are optional. */
+    static const char type_only[] = "{\"type\":\"email.sent\"}";
+    now = (long)time(NULL);
+    sig = sign_v1(secret, svix_id, now, type_only, strlen(type_only));
+    CHECK(sig != NULL);
+    if (!sig)
+        return;
+    snprintf(ts, sizeof ts, "%ld", now);
+    memset(&event, 0, sizeof event);
+    memset(&err, 0, sizeof err);
+    rc = resend_webhook_verify(secret, svix_id, ts, sig, type_only, strlen(type_only), &event, &err);
+    CHECK(rc == 0);
+    CHECK(event.type != NULL && strcmp(event.type, "email.sent") == 0);
+    CHECK(event.created_at == NULL);
+    CHECK(event.email_id == NULL);
+    CHECK(event.data_json == NULL);
     resend_event_free(&event);
     free(sig);
 
@@ -1816,11 +1850,6 @@ static void test_webhook_verify(void) {
     free(sig);
 
     snprintf(ts, sizeof ts, "%ld", (long)time(NULL));
-    memset(&event, 0, sizeof event);
-    rc = resend_webhook_verify("MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", svix_id, ts, "v1,aa", body,
-                               strlen(body), &event, &err);
-    CHECK(rc == -1);
-    CHECK(strcmp(err.message, "invalid secret") == 0);
     memset(&event, 0, sizeof event);
     rc = resend_webhook_verify("whsec_****", svix_id, ts, "v1,aa", body, strlen(body), &event,
                                &err);
