@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <openssl/crypto.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,7 +11,10 @@ void resend_api_key_free(resend_api_key *key) {
     free(key->name);
     free(key->created_at);
     free(key->last_used_at);
-    free(key->token);
+    if (key->token) {
+        OPENSSL_cleanse(key->token, strlen(key->token));
+        free(key->token);
+    }
     memset(key, 0, sizeof *key);
 }
 
@@ -180,13 +184,16 @@ int resend_api_keys_create(resend *client, const resend_api_key_create *key, res
     }
 
     size_t len = resp.body.data ? resp.body.len : 0;
-    if (parse_api_key(resp.body.data ? resp.body.data : "", len, out, 1) != 0) {
+    int rc = parse_api_key(resp.body.data ? resp.body.data : "", len, out, 1);
+    int status = (int)resp.status;
+    if (resp.body.data)
+        OPENSSL_cleanse(resp.body.data, resp.body.len); /* the body holds the new token */
+    resend_http_response_free(&resp);
+    if (rc != 0) {
         resend_api_key_free(out);
-        resend_error_set(client, (int)resp.status, NULL, "invalid api key");
-        resend_http_response_free(&resp);
+        resend_error_set(client, status, NULL, "invalid api key");
         return -1;
     }
-    resend_http_response_free(&resp);
     return 0;
 }
 

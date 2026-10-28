@@ -6,6 +6,7 @@
 #endif
 #endif
 #include <curl/curl.h>
+#include <openssl/crypto.h>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -99,7 +100,10 @@ resend *resend_init(const char *api_key) {
 void resend_free(resend *client) {
     if (!client)
         return;
-    free(client->api_key);
+    if (client->api_key) {
+        OPENSSL_cleanse(client->api_key, strlen(client->api_key));
+        free(client->api_key);
+    }
     free(client->base_url);
     free(client->err_name);
     free(client->err_message);

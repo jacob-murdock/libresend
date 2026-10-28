@@ -1,6 +1,7 @@
 #include "internal.h"
 
 #include <curl/curl.h>
+#include <openssl/crypto.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -331,6 +332,7 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
         size_t idem_len = strlen("Idempotency-Key: ") + strlen(idempotency_key) + 1;
         idem = malloc(idem_len);
         if (!idem) {
+            OPENSSL_cleanse(auth, auth_len);
             free(auth);
             curl_easy_cleanup(easy);
             free(url);
@@ -344,6 +346,7 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
         batch_hdr = malloc(batch_len);
         if (!batch_hdr) {
             free(idem);
+            OPENSSL_cleanse(auth, auth_len);
             free(auth);
             curl_easy_cleanup(easy);
             free(url);
@@ -362,6 +365,7 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
         headers = curl_slist_append(headers, idem);
     if (batch_hdr)
         headers = curl_slist_append(headers, batch_hdr);
+    OPENSSL_cleanse(auth, auth_len);
     free(auth);
     free(idem);
     free(batch_hdr);
