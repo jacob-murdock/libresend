@@ -86,6 +86,6 @@ int main(void) {
 }
 EOF
 # shellcheck disable=SC2086
-${CC:-cc} $(pkg-config --define-variable=prefix="$stage/usr" --cflags libresend) \
+${CC:-cc} ${CFLAGS:-} $(pkg-config --define-variable=prefix="$stage/usr" --cflags libresend) \
     -o "$work/smoke" "$work/smoke.c" $libs
 LD_LIBRARY_PATH="$stage/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$work/smoke"

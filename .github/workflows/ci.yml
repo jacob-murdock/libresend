@@ -1,0 +1,65 @@
+# make check against the loopback fake. No Resend API key.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.cc }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    env:
+      CC: ${{ matrix.cc }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install libcurl headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
+
+      - name: make check
+        run: |
+          unset RESEND_API_KEY
+          make check
+
+      - name: make examples
+        run: make examples
+
+      - name: Install smoke
+        run: |
+          prefix="$RUNNER_TEMP/p"
+          make install PREFIX="$prefix"
+          grep -x -F "prefix=$prefix" "$prefix/lib/pkgconfig/libresend.pc"
+          export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+          $CC examples/send_email.c $(pkg-config --cflags --libs libresend) -o "$RUNNER_TEMP/smoke"
+
+  sanitize:
+    name: sanitize
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CC: gcc
+      CFLAGS: -std=c11 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install libcurl headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
+
+      - name: make check
+        run: |
+          unset RESEND_API_KEY
+          make check
