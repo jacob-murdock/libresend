@@ -59,7 +59,7 @@ resend_received_free(&email);
 
 List results carry the envelope and attachment metadata. Get also fills `html`, `text`, `headers`, `received_for`, `authentication`, and `raw`. `authentication` is the SPF, DKIM, and DMARC result Resend computed. `html_format=data_uri` can be large; get allows 64 MiB, the same cap as download.
 
-Attachments on the email have no download URL. `resend_receiving_attachments_list` and `resend_receiving_attachment_get` return a signed `download_url` and `expires_at`. `resend_download` GETs that HTTPS URL, or `raw.download_url`, and follows redirects that stay on HTTPS. It honors proxy environment variables. The call fails past 64 MiB instead of buffering without limit.
+Attachments on the email have no download URL. `resend_receiving_attachments_list` and `resend_receiving_attachment_get` return a signed `download_url` and `expires_at`. `resend_download` GETs that HTTPS URL, or `raw.download_url`, and follows redirects that stay on HTTPS. It honors proxy environment variables. The call fails past 64 MiB instead of buffering without limit. A 30-second stall aborts the transfer; there is no total time cap.
 
 ## Webhooks
 
