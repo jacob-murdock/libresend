@@ -1,6 +1,8 @@
 # libresend. The shared library links libcurl and OpenSSL; it does not ship them.
 
-CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -pthread
+CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pthread -O2
+# Command-line CFLAGS replaces the line above. This still applies.
+override CFLAGS += -fstack-protector-strong
 CPPFLAGS += -Iinclude -D_GNU_SOURCE
 
 VERSION := $(shell sed -n 's/^\#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' include/resend.h)
@@ -16,6 +18,9 @@ $(error pkg-config did not find libcurl and openssl)
 endif
 CPPFLAGS += $(shell pkg-config --cflags libcurl openssl)
 endif
+
+# After any distro -D_FORTIFY_SOURCE, so -Werror does not see a redefinition.
+CPPFLAGS += -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2
 
 PREFIX ?= /usr/local
 # Override for lib64. install, uninstall, and the .pc libdir use this.
@@ -59,7 +64,7 @@ $(LIB): $(LIB_OBJS)
 	$(AR) rcs $@ $^
 
 $(SO): $(PIC_OBJS)
-	$(CC) $(CFLAGS) -shared -Wl,-soname,libresend.so.0 -Wl,-z,defs -o $@ $(PIC_OBJS) $(CURL_LIBS)
+	$(CC) $(CFLAGS) -shared -Wl,-soname,libresend.so.0 -Wl,-z,defs -Wl,-z,relro,-z,now -o $@ $(PIC_OBJS) $(CURL_LIBS)
 
 # Empty translation unit: header is self-contained under C99 -pedantic.
 $(HEADER_C99): include/resend.h | $(BUILD)
@@ -80,6 +85,7 @@ $(CHECK): $(BUILD)/check.o $(BUILD)/fake.o $(BUILD)/limits.o $(LIB)
 
 check: $(CHECK) $(HEADER_C99)
 	$(CHECK)
+	$(SHELL) tests/build.sh '$(MAKE)'
 	$(SHELL) tests/install.sh '$(MAKE)'
 	$(SHELL) tests/dist.sh '$(MAKE)'
 

@@ -53,7 +53,7 @@ jobs:
     timeout-minutes: 15
     env:
       CC: gcc
-      CFLAGS: -std=c11 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+      CFLAGS: -std=c11 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -O1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -120,4 +120,4 @@ jobs:
           sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
 
       - name: Build static library
-        run: make build/libresend.a CFLAGS="-std=c99 -pedantic -Wall -Wextra -pthread"
+        run: make build/libresend.a CFLAGS="-std=c99 -pedantic -Wall -Wextra -pthread -O2"
