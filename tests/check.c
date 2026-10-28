@@ -5864,7 +5864,11 @@ static void test_suppressions_batch(void) {
     fake_stop(f);
 }
 
+/* Constants in src/internal.h. Deadlines are not timed. */
+int test_limits(void);
+
 int main(void) {
+    failures += test_limits();
     test_send();
     test_set_base_url();
     test_error_body();

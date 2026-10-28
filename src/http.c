@@ -259,6 +259,23 @@ int resend_curl_set_protocols(void *easy, int https_only) {
     return brc == CURLE_OK ? 0 : -1;
 }
 
+int resend_curl_set_deadline(void *easy, size_t body_max) {
+    CURL *c = easy;
+    long total = LIBRESEND_TIMEOUT_SEC;
+    long stall_limit = 0;
+    long stall_time = 0;
+    if (body_max > (size_t)LIBRESEND_BODY_MAX) {
+        total = LIBRESEND_TIMEOUT_CEILING_SEC;
+        stall_limit = LIBRESEND_LOW_SPEED_LIMIT;
+        stall_time = LIBRESEND_TIMEOUT_SEC;
+    }
+    if (curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, stall_limit) != CURLE_OK ||
+        curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, stall_time) != CURLE_OK ||
+        curl_easy_setopt(c, CURLOPT_TIMEOUT, total) != CURLE_OK)
+        return -1;
+    return 0;
+}
+
 /* Curl copies CR and LF from these strings into the request. */
 static int no_ctl(const char *s) {
     if (!s)
@@ -394,14 +411,13 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
     curl_easy_setopt(easy, CURLOPT_HEADERDATA, &hctx);
     curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 10L);
-    if (resend_curl_set_protocols(easy, 0) != 0) {
+    if (resend_curl_set_protocols(easy, 0) != 0 || resend_curl_set_deadline(easy, body_max) != 0) {
         curl_slist_free_all(headers);
         curl_easy_cleanup(easy);
         free(url);
         resend_error_set(client, 0, NULL, "curl setup failed");
         return -1;
     }
-    curl_easy_setopt(easy, CURLOPT_TIMEOUT, (long)LIBRESEND_TIMEOUT_SEC);
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, (long)LIBRESEND_CONNECT_TIMEOUT_SEC);
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     /* System CA store; CURLOPT_CAINFO left unset. */

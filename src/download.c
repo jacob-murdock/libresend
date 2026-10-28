@@ -9,8 +9,8 @@
 /*
  * Plain GET of a signed URL, like resend-node's downloadRaw. Absolute https://
  * only, redirects included. No Authorization header: the signed URL is the proof.
- * 64 MiB cap. Connect timeout matches API calls; the transfer uses a
- * stall abort instead of a total deadline. *out_bytes is malloc'd.
+ * 64 MiB cap. Connect timeout matches API calls. The transfer aborts on a
+ * stall or at the shared ceiling. *out_bytes is malloc'd.
  */
 
 struct write_ctx {
@@ -102,10 +102,8 @@ int resend_download(resend *client, const char *https_url, void **out_bytes, siz
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 10L);
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, (long)LIBRESEND_CONNECT_TIMEOUT_SEC);
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
-    /* Abort if the transfer stays under 1 byte/s for 30s. No total deadline. */
-    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, (long)LIBRESEND_TIMEOUT_SEC);
     if (resend_curl_set_protocols(easy, 1) != 0 ||
+        resend_curl_set_deadline(easy, LIBRESEND_LARGE_BODY_MAX) != 0 ||
         curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 1L) != CURLE_OK ||
         curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 2L) != CURLE_OK) {
         curl_slist_free_all(headers);

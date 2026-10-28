@@ -59,9 +59,9 @@ resend_received_free(&email);
 
 `html_format` is `data_uri` or `cid`. `data_uri` inlines images. `cid` keeps `cid:` references that match an attachment `content_id`. A message too large to inline comes back as `cid` either way; the response field says which.
 
-List results carry the envelope and attachment metadata. Get also fills `html`, `text`, `headers`, `received_for`, `authentication`, and `raw`. `authentication` is the SPF, DKIM, and DMARC result Resend computed. `html_format=data_uri` can be large; get allows 64 MiB, the same cap as download.
+List results carry the envelope and attachment metadata. Get also fills `html`, `text`, `headers`, `received_for`, `authentication`, and `raw`. `authentication` is the SPF, DKIM, and DMARC result Resend computed. `html_format=data_uri` can be large. Inlined HTML can reach 100 MB before Resend falls back to `cid:` references, so get allows 128 MiB.
 
-Attachments on the email have no download URL. `resend_receiving_attachments_list` and `resend_receiving_attachment_get` return a signed `download_url` and `expires_at`. `resend_download` GETs that HTTPS URL, or `raw.download_url`, and follows redirects that stay on HTTPS. It honors proxy environment variables. The call fails past 64 MiB instead of buffering without limit. A 30-second stall aborts the transfer; there is no total time cap.
+Attachments on the email have no download URL. `resend_receiving_attachments_list` and `resend_receiving_attachment_get` return a signed `download_url` and `expires_at`. `resend_download` GETs that HTTPS URL, or `raw.download_url`, and follows redirects that stay on HTTPS. It honors proxy environment variables. The call fails past 64 MiB instead of buffering without limit. A 30-second stall aborts the transfer, and a 300-second ceiling stops a slow drip. Receiving get and logs get use that same deadline.
 
 ## Webhooks
 

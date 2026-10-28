@@ -247,7 +247,8 @@ typedef struct {
     int has_more;
 } resend_received_list;
 
-/* html_format is "data_uri", "cid", or NULL to omit the query. 64 MiB cap. */
+/* html_format is "data_uri", "cid", or NULL to omit the query.
+ * 128 MiB cap. Aborts below 1 byte/s for 30s, or at 300s. */
 RESEND_API int resend_receiving_get(resend *client, const char *email_id, const char *html_format,
                                     resend_received *out);
 RESEND_API int resend_receiving_list(resend *client, const resend_page *page,
@@ -262,7 +263,7 @@ RESEND_API int resend_receiving_attachment_get(resend *client, const char *email
 /*
  * Download raw.download_url, or an attachment download_url.
  * HTTPS only, redirects included. Honors proxy environment variables.
- * Fails past 64 MiB. Aborts after a 30s stall; no total time cap.
+ * Fails past 64 MiB. Aborts below 1 byte/s for 30s, or at 300s.
  * *out_bytes is malloc'd; the caller frees it.
  */
 RESEND_API int resend_download(resend *client, const char *https_url, void **out_bytes,
@@ -425,7 +426,7 @@ typedef struct {
 } resend_log_list;
 
 RESEND_API int resend_logs_list(resend *client, const resend_page *page, resend_log_list *out);
-/* 64 MiB cap. 30s total timeout. */
+/* 64 MiB cap. Aborts below 1 byte/s for 30s, or at 300s. */
 RESEND_API int resend_logs_get(resend *client, const char *log_id, resend_log *out);
 
 RESEND_API void resend_log_free(resend_log *log);

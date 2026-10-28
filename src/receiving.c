@@ -406,7 +406,7 @@ int resend_receiving_get(resend *client, const char *email_id, const char *html_
         return -1;
 
     resend_http_response resp;
-    if (receiving_get_ok(client, path, LIBRESEND_LARGE_BODY_MAX, &resp) != 0)
+    if (receiving_get_ok(client, path, LIBRESEND_RECEIVING_BODY_MAX, &resp) != 0)
         return -1;
 
     size_t len = resp.body.data ? resp.body.len : 0;

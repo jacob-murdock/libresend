@@ -69,8 +69,11 @@ $(BUILD)/fake.o: tests/fake.c tests/fake.h | $(BUILD)
 $(BUILD)/check.o: tests/check.c tests/fake.h include/resend.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c tests/check.c -o $@
 
-$(CHECK): $(BUILD)/check.o $(BUILD)/fake.o $(LIB)
-	$(CC) $(CFLAGS) -o $@ $(BUILD)/check.o $(BUILD)/fake.o $(LIB) $(CURL_LIBS)
+$(BUILD)/limits.o: tests/limits.c src/internal.h include/resend.h | $(BUILD)
+	$(CC) $(CPPFLAGS) -Isrc $(CFLAGS) -c tests/limits.c -o $@
+
+$(CHECK): $(BUILD)/check.o $(BUILD)/fake.o $(BUILD)/limits.o $(LIB)
+	$(CC) $(CFLAGS) -o $@ $(BUILD)/check.o $(BUILD)/fake.o $(BUILD)/limits.o $(LIB) $(CURL_LIBS)
 
 check: $(CHECK) $(HEADER_C99)
 	$(CHECK)

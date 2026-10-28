@@ -8,9 +8,13 @@
 #define LIBRESEND_VERSION "0.1.0"
 #define LIBRESEND_DEFAULT_BASE "https://api.resend.com"
 #define LIBRESEND_TIMEOUT_SEC 30
+#define LIBRESEND_TIMEOUT_CEILING_SEC 300
+#define LIBRESEND_LOW_SPEED_LIMIT 1
 #define LIBRESEND_CONNECT_TIMEOUT_SEC 2
 #define LIBRESEND_BODY_MAX (1024 * 1024)
 #define LIBRESEND_LARGE_BODY_MAX ((size_t)64 * 1024 * 1024)
+/* Inlined HTML can reach 100 MB before Resend falls back to cid references. */
+#define LIBRESEND_RECEIVING_BODY_MAX ((size_t)128 * 1024 * 1024)
 
 struct resend {
     char *api_key;
@@ -109,6 +113,13 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
  * CURLOPT_PROTOCOLS bitmask. Any other failure is -1.
  */
 int resend_curl_set_protocols(void *easy, int https_only);
+/*
+ * Transfer deadline. A cap above LIBRESEND_BODY_MAX aborts after a stall of
+ * LIBRESEND_LOW_SPEED_LIMIT bytes/s for LIBRESEND_TIMEOUT_SEC, and at
+ * LIBRESEND_TIMEOUT_CEILING_SEC. Any other cap keeps the 30s total.
+ * 0 on success, -1 if curl rejects an option.
+ */
+int resend_curl_set_deadline(void *easy, size_t body_max);
 
 /*
  * prefix is "/emails/" or "/emails/receiving/". List and get fill download_url
