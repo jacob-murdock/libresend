@@ -2525,6 +2525,13 @@ static void test_webhook_verify(void) {
     CHECK(rc == -1);
     CHECK(event.type == NULL);
     CHECK(strcmp(err.message, "timestamp outside tolerance") == 0);
+    /* Past the 32-bit long limit (2038-01-19); must parse as int64_t then fail the window. */
+    memset(&event, 0, sizeof event);
+    rc = resend_webhook_verify(secret, svix_id, "2147483648", "v1,aa", body, strlen(body), &event,
+                               &err);
+    CHECK(rc == -1);
+    CHECK(event.type == NULL);
+    CHECK(strcmp(err.message, "timestamp outside tolerance") == 0);
     memset(&event, 0, sizeof event);
     rc = resend_webhook_verify(secret, svix_id, "111111111111111111111", "v1,aa", body, strlen(body),
                                &event, &err);

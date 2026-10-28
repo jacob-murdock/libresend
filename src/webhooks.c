@@ -108,21 +108,21 @@ static int ct_equal(const char *a, size_t alen, const char *b, size_t blen) {
     return CRYPTO_memcmp(a, b, alen) == 0;
 }
 
-/* Decimal unix seconds. A value that does not fit in long is not a timestamp. */
-static int parse_timestamp(const char *s, long *out) {
+/* Decimal unix seconds. A value that does not fit in int64_t is not a timestamp. */
+static int parse_timestamp(const char *s, int64_t *out) {
     if (!s || !s[0])
         return -1;
     size_t n = 0;
-    unsigned long v = 0;
+    uint64_t v = 0;
     for (const unsigned char *p = (const unsigned char *)s; *p; p++, n++) {
         if (n >= WEBHOOK_TIMESTAMP_DIGITS || *p < '0' || *p > '9')
             return -1;
         unsigned digit = (unsigned)(*p - '0');
-        if (v > ((unsigned long)LONG_MAX - digit) / 10)
+        if (v > ((uint64_t)INT64_MAX - digit) / 10)
             return -1;
         v = v * 10 + digit;
     }
-    *out = (long)v;
+    *out = (int64_t)v;
     return 0;
 }
 
@@ -260,7 +260,7 @@ int resend_webhook_verify(const char *secret, const char *svix_id, const char *s
     }
     webhook_err(err, "");
 
-    long ts = 0;
+    int64_t ts = 0;
     if (parse_timestamp(svix_timestamp, &ts) != 0) {
         webhook_err(err, "invalid timestamp");
         return -1;
@@ -270,11 +270,11 @@ int resend_webhook_verify(const char *secret, const char *svix_id, const char *s
         webhook_err(err, "timestamp outside tolerance");
         return -1;
     }
-    /* Unsigned difference. A signed now - ts overflows when ts is near LONG_MAX. */
-    unsigned long now = (unsigned long)now_t;
-    unsigned long got = (unsigned long)ts;
-    int stale = got > now ? (got - now > (unsigned long)WEBHOOK_TOLERANCE_SEC)
-                          : (now - got > (unsigned long)WEBHOOK_TOLERANCE_SEC);
+    /* Unsigned difference. A signed now - ts overflows when ts is near INT64_MAX. */
+    uint64_t now = (uint64_t)now_t;
+    uint64_t got = (uint64_t)ts;
+    int stale = got > now ? (got - now > (uint64_t)WEBHOOK_TOLERANCE_SEC)
+                          : (now - got > (uint64_t)WEBHOOK_TOLERANCE_SEC);
     if (stale) {
         webhook_err(err, "timestamp outside tolerance");
         return -1;
