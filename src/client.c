@@ -1,15 +1,20 @@
 #include "internal.h"
 
 #include <curl/curl.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
-static void ensure_curl(void) {
-    static int once;
-    if (!once) {
-        curl_global_init(CURL_GLOBAL_DEFAULT);
-        once = 1;
-    }
+static CURLcode curl_init_rc = CURLE_FAILED_INIT;
+static pthread_once_t curl_once = PTHREAD_ONCE_INIT;
+
+static void curl_once_init(void) {
+    curl_init_rc = curl_global_init(CURL_GLOBAL_DEFAULT);
+}
+
+static int ensure_curl(void) {
+    pthread_once(&curl_once, curl_once_init);
+    return curl_init_rc == CURLE_OK ? 0 : -1;
 }
 
 void resend_error_clear(resend *client) {
@@ -50,7 +55,8 @@ void resend_error_from_body(resend *client, int status, const char *body, size_t
 resend *resend_init(const char *api_key) {
     if (!api_key)
         return NULL;
-    ensure_curl();
+    if (ensure_curl() != 0)
+        return NULL;
     resend *client = calloc(1, sizeof *client);
     if (!client)
         return NULL;
@@ -88,6 +94,7 @@ void resend_set_base_url(resend *client, const char *base_url) {
     free(client->base_url);
     client->base_url = copy;
 }
+
 
 const resend_error *resend_last_error(const resend *client) {
     if (!client)

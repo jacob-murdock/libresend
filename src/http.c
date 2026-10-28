@@ -255,40 +255,33 @@ int resend_http_json(resend *client, const char *method, const char *path, const
     curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
     curl_easy_setopt(easy, CURLOPT_TIMEOUT, (long)LIBRESEND_TIMEOUT_SEC);
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, (long)LIBRESEND_CONNECT_TIMEOUT_SEC);
+    curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     /* System CA store; CURLOPT_CAINFO left unset. */
 
     CURLcode rc = curl_easy_perform(easy);
+    long status = 0;
+    curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &status);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(easy);
+    free(url);
+
     if (hctx.drop_to_http) {
         resend_error_set(client, 0, NULL, "redirect to http refused");
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(easy);
-        free(url);
         resend_http_response_free(out);
         return -1;
     }
     if (wctx.overflow) {
         resend_error_set(client, 0, NULL, "response body too large");
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(easy);
-        free(url);
         resend_http_response_free(out);
         return -1;
     }
     if (rc != CURLE_OK) {
         resend_error_set(client, 0, NULL, curl_easy_strerror(rc));
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(easy);
-        free(url);
         resend_http_response_free(out);
         return -1;
     }
 
-    long status = 0;
-    curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &status);
     out->status = status;
-
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(easy);
-    free(url);
     return 0;
 }
