@@ -1457,6 +1457,187 @@ static void test_emails_batch_validation(void) {
     fake_stop(f);
 }
 
+/*
+ * Sent-email attachments use the received-attachment type. List and get set
+ * download_url and expires_at. The path is /emails/{id}/attachments.
+ */
+static void test_emails_attachments(void) {
+    static const char email_id[] = "4ef9a417-02e9-4d39-ad75-9611e0fcc33c";
+    static const char att_id[] = "2a0c9ce0-3112-4728-976e-47ddcd16a318";
+    static const char list_body[] =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"2a0c9ce0-3112-4728-976e-47ddcd16a318\","
+        "\"filename\":\"avatar.png\",\"content_type\":\"image/png\","
+        "\"content_disposition\":\"inline\",\"content_id\":\"img001\",\"size\":4096,"
+        "\"download_url\":\"https://cdn.resend.com/avatar.png?sig=1\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"},"
+        "{\"id\":\"3b1d0df1-4223-5839-087f-54eedd27b419\","
+        "\"filename\":null,\"content_type\":\"application/pdf\","
+        "\"content_disposition\":null,\"content_id\":null,\"size\":13264,"
+        "\"download_url\":\"https://cdn.resend.com/doc.pdf?sig=2\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"}"
+        "]}";
+    static const char get_body[] =
+        "{\"object\":\"attachment\","
+        "\"id\":\"2a0c9ce0-3112-4728-976e-47ddcd16a318\","
+        "\"filename\":\"avatar.png\",\"content_type\":\"image/png\","
+        "\"content_disposition\":\"inline\",\"content_id\":\"img001\",\"size\":4096,"
+        "\"download_url\":\"https://cdn.resend.com/avatar.png?sig=1\","
+        "\"expires_at\":\"2026-10-17T14:29:41.521Z\"}";
+
+    fake_exchange list_ex = {.status = 200, .body = list_body};
+    fake *f = fake_start(&list_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    resend *client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+
+    resend_page both = {.after = "a", .before = "b"};
+    resend_received_attachment_list list = {0};
+    int rc = resend_emails_attachments_list(client, email_id, &both, &list);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "after and before cannot be combined") == 0);
+
+    rc = resend_emails_attachments_list(client, "", NULL, &list);
+    CHECK(rc == -1);
+    CHECK(resend_emails_attachments_list(client, "..", NULL, &list) == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_page page = {.after = "cursor-1", .limit = 0};
+    rc = resend_emails_attachments_list(client, email_id, &page, &list);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "GET") == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f),
+                 "/emails/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/attachments?after=cursor-1") == 0);
+    CHECK(list.has_more == 1);
+    CHECK(list.count == 2);
+    CHECK(list.items != NULL);
+    CHECK(list.items[0].id != NULL && strcmp(list.items[0].id, att_id) == 0);
+    CHECK(list.items[0].filename != NULL && strcmp(list.items[0].filename, "avatar.png") == 0);
+    CHECK(list.items[0].content_type != NULL &&
+          strcmp(list.items[0].content_type, "image/png") == 0);
+    CHECK(list.items[0].content_disposition != NULL &&
+          strcmp(list.items[0].content_disposition, "inline") == 0);
+    CHECK(list.items[0].content_id != NULL && strcmp(list.items[0].content_id, "img001") == 0);
+    CHECK(list.items[0].size == 4096);
+    CHECK(list.items[0].download_url != NULL &&
+          strcmp(list.items[0].download_url, "https://cdn.resend.com/avatar.png?sig=1") == 0);
+    CHECK(list.items[0].expires_at != NULL &&
+          strcmp(list.items[0].expires_at, "2026-10-17T14:29:41.521Z") == 0);
+    CHECK(list.items[1].filename == NULL);
+    CHECK(list.items[1].content_disposition == NULL);
+    CHECK(list.items[1].content_id == NULL);
+    CHECK(list.items[1].size == 13264);
+    CHECK(list.items[1].download_url != NULL &&
+          strcmp(list.items[1].download_url, "https://cdn.resend.com/doc.pdf?sig=2") == 0);
+    resend_received_attachment_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    f = fake_start(&list_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_page limited = {.before = "cursor-2", .limit = 5};
+    memset(&list, 0, sizeof list);
+    rc = resend_emails_attachments_list(client, "a/b", &limited, &list);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f), "/emails/a%2Fb/attachments?before=cursor-2&limit=5") == 0);
+    resend_received_attachment_list_free(&list);
+    resend_free(client);
+    fake_stop(f);
+
+    fake_exchange get_ex = {.status = 200, .body = get_body};
+    f = fake_start(&get_ex, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_received_attachment att = {0};
+    rc = resend_emails_attachment_get(client, email_id, "", &att);
+    CHECK(rc == -1);
+    rc = resend_emails_attachment_get(client, "", att_id, &att);
+    CHECK(rc == -1);
+    rc = resend_emails_attachment_get(client, email_id, "..", &att);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
+
+    rc = resend_emails_attachment_get(client, email_id, att_id, &att);
+    CHECK(rc == 0);
+    CHECK(fake_path(f) != NULL &&
+          strcmp(fake_path(f),
+                 "/emails/4ef9a417-02e9-4d39-ad75-9611e0fcc33c/attachments/"
+                 "2a0c9ce0-3112-4728-976e-47ddcd16a318") == 0);
+    CHECK(att.id != NULL && strcmp(att.id, att_id) == 0);
+    CHECK(att.filename != NULL && strcmp(att.filename, "avatar.png") == 0);
+    CHECK(att.content_type != NULL && strcmp(att.content_type, "image/png") == 0);
+    CHECK(att.content_disposition != NULL && strcmp(att.content_disposition, "inline") == 0);
+    CHECK(att.content_id != NULL && strcmp(att.content_id, "img001") == 0);
+    CHECK(att.size == 4096);
+    CHECK(att.download_url != NULL &&
+          strcmp(att.download_url, "https://cdn.resend.com/avatar.png?sig=1") == 0);
+    CHECK(att.expires_at != NULL && strcmp(att.expires_at, "2026-10-17T14:29:41.521Z") == 0);
+    resend_received_attachment_free(&att);
+    resend_free(client);
+    fake_stop(f);
+
+    static const fake_exchange bad[] = {
+        {.status = 200, .body = "not-json"},
+        {.status = 404, .body = "{\"name\":\"not_found\",\"message\":\"Attachment not found\"}"},
+    };
+    f = fake_start(bad, sizeof bad / sizeof bad[0]);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    client = client_on(f);
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    resend_received_attachment_list bad_list = {0};
+    rc = resend_emails_attachments_list(client, email_id, NULL, &bad_list);
+    CHECK(rc == -1);
+    CHECK(bad_list.items == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 200);
+    resend_received_attachment_list_free(&bad_list);
+
+    memset(&att, 0, sizeof att);
+    rc = resend_emails_attachment_get(client, email_id, att_id, &att);
+    CHECK(rc == -1);
+    CHECK(att.id == NULL);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 404);
+    CHECK(err->name != NULL && strcmp(err->name, "not_found") == 0);
+    resend_received_attachment_free(&att);
+    CHECK(fake_request_count(f) == 2);
+    resend_free(client);
+    fake_stop(f);
+}
+
 static resend *client_on(fake *f) {
     char base[64];
     snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
@@ -4488,6 +4669,7 @@ int main(void) {
     test_emails_update();
     test_emails_send_batch();
     test_emails_batch_validation();
+    test_emails_attachments();
     test_emails_id_path();
     test_emails_list_query();
     test_emails_list_bad();

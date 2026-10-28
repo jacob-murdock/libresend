@@ -437,15 +437,15 @@ int resend_receiving_list(resend *client, const resend_page *page, resend_receiv
     return 0;
 }
 
-int resend_receiving_attachments_list(resend *client, const char *email_id, const resend_page *page,
-                                      resend_received_attachment_list *out) {
-    if (!client || !email_id || !email_id[0] || !out)
+int resend_attachments_list(resend *client, const char *prefix, const char *email_id,
+                            const resend_page *page, resend_received_attachment_list *out) {
+    if (!client || !prefix || !email_id || !email_id[0] || !out)
         return -1;
     resend_error_clear(client);
     memset(out, 0, sizeof *out);
 
     char *base = NULL;
-    if (resend_path_with_id(client, "/emails/receiving/", email_id, "/attachments", &base) != 0)
+    if (resend_path_with_id(client, prefix, email_id, "/attachments", &base) != 0)
         return -1;
 
     char *path = NULL;
@@ -470,23 +470,24 @@ int resend_receiving_attachments_list(resend *client, const char *email_id, cons
     return 0;
 }
 
-int resend_receiving_attachment_get(resend *client, const char *email_id, const char *attachment_id,
-                                    resend_received_attachment *out) {
-    if (!client || !email_id || !email_id[0] || !attachment_id || !attachment_id[0] || !out)
+int resend_attachment_get(resend *client, const char *prefix, const char *email_id,
+                          const char *attachment_id, resend_received_attachment *out) {
+    if (!client || !prefix || !email_id || !email_id[0] || !attachment_id || !attachment_id[0] ||
+        !out)
         return -1;
     resend_error_clear(client);
     memset(out, 0, sizeof *out);
 
-    char *prefix = NULL;
-    if (resend_path_with_id(client, "/emails/receiving/", email_id, "/attachments/", &prefix) != 0)
+    char *built = NULL;
+    if (resend_path_with_id(client, prefix, email_id, "/attachments/", &built) != 0)
         return -1;
 
     char *path = NULL;
-    if (resend_path_with_id(client, prefix, attachment_id, NULL, &path) != 0) {
-        free(prefix);
+    if (resend_path_with_id(client, built, attachment_id, NULL, &path) != 0) {
+        free(built);
         return -1;
     }
-    free(prefix);
+    free(built);
 
     resend_http_response resp;
     if (receiving_get_ok(client, path, LIBRESEND_BODY_MAX, &resp) != 0)
@@ -501,4 +502,14 @@ int resend_receiving_attachment_get(resend *client, const char *email_id, const 
     }
     resend_http_response_free(&resp);
     return 0;
+}
+
+int resend_receiving_attachments_list(resend *client, const char *email_id, const resend_page *page,
+                                      resend_received_attachment_list *out) {
+    return resend_attachments_list(client, "/emails/receiving/", email_id, page, out);
+}
+
+int resend_receiving_attachment_get(resend *client, const char *email_id, const char *attachment_id,
+                                    resend_received_attachment *out) {
+    return resend_attachment_get(client, "/emails/receiving/", email_id, attachment_id, out);
 }

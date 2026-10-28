@@ -580,6 +580,16 @@ int resend_emails_update(resend *client, const char *email_id, const char *sched
     return 0;
 }
 
+int resend_emails_attachments_list(resend *client, const char *email_id, const resend_page *page,
+                                   resend_received_attachment_list *out) {
+    return resend_attachments_list(client, "/emails/", email_id, page, out);
+}
+
+int resend_emails_attachment_get(resend *client, const char *email_id, const char *attachment_id,
+                                 resend_received_attachment *out) {
+    return resend_attachment_get(client, "/emails/", email_id, attachment_id, out);
+}
+
 int resend_emails_list(resend *client, const resend_page *page, resend_email_list *out) {
     if (!client || !out)
         return -1;

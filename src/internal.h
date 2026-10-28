@@ -103,6 +103,15 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
                            size_t body_max, resend_http_response *out);
 
 /*
+ * prefix is "/emails/" or "/emails/receiving/". List and get fill download_url
+ * and expires_at. Failure sets the error slot.
+ */
+int resend_attachments_list(resend *client, const char *prefix, const char *email_id,
+                            const resend_page *page, resend_received_attachment_list *out);
+int resend_attachment_get(resend *client, const char *prefix, const char *email_id,
+                          const char *attachment_id, resend_received_attachment *out);
+
+/*
  * Build path with optional page query. Rejects after+before together (error slot,
  * no request). limit 0 omits the parameter. Query values are percent-encoded.
  * *out is malloc'd.

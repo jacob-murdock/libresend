@@ -44,6 +44,8 @@ A display name is part of the address string, as `Name <email>`. `to`, `cc`, `bc
 
 `resend_emails_send_batch` sends up to 100 messages in one call and uses the batch's idempotency key. `validation` is `strict` or `permissive`, sent as `x-batch-validation`. NULL omits that header. Strict is the API default: one invalid message fails the batch. Permissive sends the valid messages, and the result is those ids. `resend_emails_get` and `resend_emails_list` return the stored message, including `message_id` and `last_event`. `resend_emails_update` changes `scheduled_at` on a scheduled send and returns the id. `resend_emails_cancel` cancels a scheduled send and returns that message.
 
+`resend_emails_attachments_list` and `resend_emails_attachment_get` return attachments of a sent email. The type is the same one receiving uses, including `download_url` and `expires_at`. `resend_download` fetches that URL.
+
 ## Receiving
 
 ```c
@@ -90,7 +92,7 @@ Lists take a `resend_page` (`after`, `before`, `limit`). NULL omits pagination. 
 
 | | |
 | --- | --- |
-| Emails | `resend_emails_send`, `resend_emails_send_batch`, `resend_emails_get`, `resend_emails_list`, `resend_emails_update`, `resend_emails_cancel` |
+| Emails | `resend_emails_send`, `resend_emails_send_batch`, `resend_emails_get`, `resend_emails_list`, `resend_emails_update`, `resend_emails_cancel`, `resend_emails_attachments_list`, `resend_emails_attachment_get` |
 | Receiving | `resend_receiving_get`, `resend_receiving_list`, `resend_receiving_attachments_list`, `resend_receiving_attachment_get`, `resend_download` |
 | Webhooks | `resend_webhook_verify` |
 | Domains | `resend_domains_create`, `resend_domains_get`, `resend_domains_list`, `resend_domains_verify`, `resend_domains_update`, `resend_domains_remove` |
@@ -102,7 +104,7 @@ Request pointers belong to the caller for the length of the call. A result belon
 
 ## Later
 
-Contacts, segments, broadcasts, templates, topics, and Inboxes. Also later: share links, domain claims, webhook endpoint management, and attachments of a sent email.
+Contacts, segments, broadcasts, templates, topics, and Inboxes. Also later: share links, domain claims, and webhook endpoint management.
 
 A daemon that stores received mail is a separate project. It can link this library once send and receiving work.
 

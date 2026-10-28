@@ -63,6 +63,27 @@ typedef struct {
     const char *content_id;   /* optional; inline images, referenced as cid: */
 } resend_attachment;
 
+/*
+ * Attachment on a sent or received email. download_url and expires_at are
+ * set by attachment get and list. A received email leaves both NULL.
+ */
+typedef struct {
+    char *id;
+    char *filename;
+    char *content_type;
+    char *content_disposition;
+    char *content_id;
+    int64_t size;
+    char *download_url;
+    char *expires_at;
+} resend_received_attachment;
+
+typedef struct {
+    resend_received_attachment *items;
+    size_t count;
+    int has_more;
+} resend_received_attachment_list;
+
 /* ---- emails ------------------------------------------------------------ */
 
 typedef struct {
@@ -138,6 +159,11 @@ int resend_emails_list(resend *client, const resend_page *page, resend_email_lis
 int resend_emails_update(resend *client, const char *email_id, const char *scheduled_at,
                          resend_sent *out);
 int resend_emails_cancel(resend *client, const char *email_id, resend_email *out);
+/* Attachments of a sent email. Same type as a received attachment; resend_download fetches it. */
+int resend_emails_attachments_list(resend *client, const char *email_id, const resend_page *page,
+                                   resend_received_attachment_list *out);
+int resend_emails_attachment_get(resend *client, const char *email_id, const char *attachment_id,
+                                 resend_received_attachment *out);
 
 void resend_sent_free(resend_sent *sent);
 void resend_sent_list_free(resend_sent_list *list);
@@ -145,23 +171,6 @@ void resend_email_free(resend_email *email);
 void resend_email_list_free(resend_email_list *list);
 
 /* ---- receiving --------------------------------------------------------- */
-
-typedef struct {
-    char *id;
-    char *filename;
-    char *content_type;
-    char *content_disposition;
-    char *content_id;
-    int64_t size;
-    char *download_url; /* set by attachment get/list; NULL on an email payload */
-    char *expires_at;
-} resend_received_attachment;
-
-typedef struct {
-    resend_received_attachment *items;
-    size_t count;
-    int has_more;
-} resend_received_attachment_list;
 
 /*
  * SPF, DKIM, and DMARC as Resend computed them. All three are NULL when
