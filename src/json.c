@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <float.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,6 +107,159 @@ int resend_json_tag_array(resend_buf *b, const resend_pair *tags, size_t count) 
             return -1;
     }
     return resend_json_array_end(b);
+}
+
+/* Least-significant digit first. */
+static int emit_lsd(resend_buf *b, const unsigned char *digs, int n) {
+    while (n > 0) {
+        if (resend_buf_putc(b, (char)('0' + digs[--n])) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+static int emit_u64(resend_buf *b, uint64_t v) {
+    unsigned char digs[20];
+    int n = 0;
+    if (v == 0)
+        return resend_buf_putc(b, '0');
+    while (v > 0) {
+        digs[n++] = (unsigned char)(v % 10);
+        v /= 10;
+    }
+    return emit_lsd(b, digs, n);
+}
+
+/* mant * 2^shift, shift >= 0. Decimal digits, no locale. */
+static int emit_shifted(resend_buf *b, uint64_t mant, int shift) {
+    unsigned char digs[400];
+    int n = 0;
+    while (mant > 0) {
+        digs[n++] = (unsigned char)(mant % 10);
+        mant /= 10;
+    }
+    for (int s = 0; s < shift; s++) {
+        int carry = 0;
+        for (int i = 0; i < n; i++) {
+            int v = digs[i] * 2 + carry;
+            digs[i] = (unsigned char)(v % 10);
+            carry = v / 10;
+        }
+        if (carry) {
+            if (n >= (int)sizeof digs)
+                return -1;
+            digs[n++] = (unsigned char)carry;
+        }
+    }
+    return emit_lsd(b, digs, n);
+}
+
+/* 1 if n is an integer and was written, 0 if it has a fraction, -1 on error.
+ * n is non-negative. Every finite double at or above 2^53 is an integer. */
+static int emit_integer(resend_buf *b, double n) {
+    uint64_t bits;
+    memcpy(&bits, &n, sizeof bits);
+    int exp2 = (int)((bits >> 52) & 0x7ff);
+    uint64_t frac = bits & 0xfffffffffffffULL;
+    if (exp2 == 0)
+        return 0;
+    uint64_t mant = frac | (1ULL << 52);
+    int shift = exp2 - 1023 - 52;
+    if (shift < 0) {
+        int drop = -shift;
+        if (drop >= 53)
+            return 0;
+        if (mant & ((1ULL << drop) - 1))
+            return 0;
+        return emit_u64(b, mant >> drop) == 0 ? 1 : -1;
+    }
+    return emit_shifted(b, mant, shift) == 0 ? 1 : -1;
+}
+
+static int emit_mant(resend_buf *b, uint64_t mant, int exp10) {
+    char rev[24];
+    int width = 0;
+    while (mant > 0) {
+        rev[width++] = (char)('0' + (mant % 10));
+        mant /= 10;
+    }
+    char digs[24];
+    for (int i = 0; i < width; i++)
+        digs[i] = rev[width - 1 - i];
+
+    int before = width + exp10;
+    if (before >= width) {
+        if (resend_buf_put(b, digs, (size_t)width) != 0)
+            return -1;
+        for (int i = 0; i < before - width; i++) {
+            if (resend_buf_putc(b, '0') != 0)
+                return -1;
+        }
+        return 0;
+    }
+    if (before <= 0) {
+        if (resend_buf_puts(b, "0.") != 0)
+            return -1;
+        for (int i = 0; i < -before; i++) {
+            if (resend_buf_putc(b, '0') != 0)
+                return -1;
+        }
+        int end = width;
+        while (end > 1 && digs[end - 1] == '0')
+            end--;
+        return resend_buf_put(b, digs, (size_t)end);
+    }
+    if (resend_buf_put(b, digs, (size_t)before) != 0)
+        return -1;
+    int end = width;
+    while (end > before && digs[end - 1] == '0')
+        end--;
+    if (end == before)
+        return 0;
+    if (resend_buf_putc(b, '.') != 0)
+        return -1;
+    return resend_buf_put(b, digs + before, (size_t)(end - before));
+}
+
+/* Fifteen significant digits, trimmed. The scale stays at or below 2^53 so
+ * rounding to an integer is exact. snprintf %g is not used: its decimal mark
+ * follows LC_NUMERIC. */
+static int emit_fraction(resend_buf *b, double n) {
+    int exp10 = 0;
+    while (n >= 1e15) {
+        n /= 10.0;
+        if (++exp10 > 400)
+            return -1;
+    }
+    while (n < 1e14) {
+        n *= 10.0;
+        if (--exp10 < -400)
+            return -1;
+    }
+    uint64_t mant = (uint64_t)(n + 0.5);
+    if (mant >= 1000000000000000ULL) {
+        mant /= 10;
+        exp10++;
+    }
+    if (mant == 0)
+        return resend_buf_putc(b, '0');
+    return emit_mant(b, mant, exp10);
+}
+
+int resend_json_number(resend_buf *b, double n) {
+    if (n != n || n > DBL_MAX || n < -DBL_MAX)
+        return -1;
+    if (n < 0) {
+        if (resend_buf_putc(b, '-') != 0)
+            return -1;
+        n = -n;
+    }
+    if (n == 0.0)
+        return resend_buf_putc(b, '0');
+    int kind = emit_integer(b, n);
+    if (kind != 0)
+        return kind < 0 ? -1 : 0;
+    return emit_fraction(b, n);
 }
 
 const char *resend_json_skip_ws(const char *p, const char *end) {

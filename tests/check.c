@@ -12,6 +12,7 @@
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -769,6 +770,131 @@ static void test_send_html_only(void) {
                  "\"to\":[\"you@example.com\"],"
                  "\"subject\":\"Hello\","
                  "\"html\":\"<p>Hi</p>\"}") == 0);
+
+    resend_sent_free(&sent);
+    resend_free(client);
+    fake_stop(f);
+}
+
+static double double_bits(uint64_t bits) {
+    double n;
+    memcpy(&n, &bits, sizeof n);
+    return n;
+}
+
+/* Template id, string and number variables, and topic_id. html is sent too.
+ * NULL variables omits that key. A count with a NULL pointer, and a non-finite
+ * number, send nothing. */
+static void test_send_template(void) {
+    static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
+    char raw[64];
+    snprintf(raw, sizeof raw, "{\"id\":\"%s\"}", id);
+
+    fake_exchange exchange = {.status = 200, .body = raw};
+    fake *f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f)
+        return;
+
+    char base[64];
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+
+    const char *const to[] = {"you@example.com"};
+    resend_template missing = {.id = "tmpl_123", .variable_count = 1};
+    resend_send message = {
+        .from = "Acme <hello@example.com>",
+        .to = to,
+        .to_count = 1,
+        .subject = "Hello",
+        .html = "<p>Hi</p>",
+        .template = &missing,
+    };
+    resend_sent sent = {0};
+
+    resend *client = resend_init("re_test");
+    CHECK(client != NULL);
+    if (!client) {
+        fake_stop(f);
+        return;
+    }
+    CHECK(resend_set_base_url(client, base) == 0);
+
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    CHECK(sent.id == NULL);
+    CHECK(fake_request_count(f) == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->name != NULL && strcmp(err->name, "missing_required_field") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing variables") == 0);
+
+    const resend_template_variable nan_var[] = {
+        {.name = "COUNT", .number = double_bits(0x7ff8000000000000ULL), .as_number = 1},
+    };
+    resend_template bad = {.id = "tmpl_123", .variables = nan_var, .variable_count = 1};
+    message.template = &bad;
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+    CHECK(err->message != NULL &&
+          strcmp(err->message, "template variable is not a finite number") == 0);
+
+    const resend_template_variable inf_var[] = {
+        {.name = "COUNT", .number = double_bits(0x7ff0000000000000ULL), .as_number = 1},
+    };
+    bad.variables = inf_var;
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    CHECK(fake_request_count(f) == 0);
+    err = resend_last_error(client);
+    CHECK(err->message != NULL &&
+          strcmp(err->message, "template variable is not a finite number") == 0);
+
+    const resend_template_variable vars[] = {
+        {.name = "variableName", .value = "Sign up now"},
+        {.name = "variableName2", .number = 123, .as_number = 1},
+        {.name = "price", .number = 1.5, .as_number = 1},
+    };
+    resend_template tpl = {.id = "tmpl_123", .variables = vars, .variable_count = 3};
+    message.template = &tpl;
+    message.topic_id = "b6d24b8e-af0b-4c3c-be0c-359bbd97381e";
+    int rc = resend_emails_send(client, &message, &sent);
+    CHECK(rc == 0);
+    CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(body_eq(f, "{\"from\":\"Acme <hello@example.com>\","
+                     "\"to\":[\"you@example.com\"],"
+                     "\"subject\":\"Hello\","
+                     "\"html\":\"<p>Hi</p>\","
+                     "\"template\":{\"id\":\"tmpl_123\","
+                     "\"variables\":{\"variableName\":\"Sign up now\","
+                     "\"variableName2\":123,\"price\":1.5}},"
+                     "\"topic_id\":\"b6d24b8e-af0b-4c3c-be0c-359bbd97381e\"}"));
+
+    resend_sent_free(&sent);
+    fake_stop(f);
+
+    f = fake_start(&exchange, 1);
+    CHECK(f != NULL);
+    if (!f) {
+        resend_free(client);
+        return;
+    }
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+    CHECK(resend_set_base_url(client, base) == 0);
+
+    resend_template id_only = {.id = "tmpl_123"};
+    message.template = &id_only;
+    message.topic_id = NULL;
+    message.html = NULL;
+    sent.id = NULL;
+    rc = resend_emails_send(client, &message, &sent);
+    CHECK(rc == 0);
+    CHECK(fake_request_count(f) == 1);
+    CHECK(body_eq(f, "{\"from\":\"Acme <hello@example.com>\","
+                     "\"to\":[\"you@example.com\"],"
+                     "\"subject\":\"Hello\","
+                     "\"template\":{\"id\":\"tmpl_123\"}}"));
 
     resend_sent_free(&sent);
     resend_free(client);
@@ -6119,6 +6245,7 @@ int main(void) {
     test_location_on_error();
     test_send_fields();
     test_send_html_only();
+    test_send_template();
     test_send_attachments();
     test_send_attachment_both();
     test_send_idempotency_key();

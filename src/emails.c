@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <float.h>
 #include <limits.h>
 #include <openssl/evp.h>
 #include <stdint.h>
@@ -75,6 +76,27 @@ static int reject_missing_arrays(resend *client, const resend_send *m) {
     return -1;
 }
 
+static int reject_template(resend *client, const resend_send *m) {
+    const resend_template *t = m->template;
+    if (!t)
+        return 0;
+    if (t->variable_count > 0 && !t->variables) {
+        resend_error_set(client, 0, "missing_required_field", "missing variables");
+        return -1;
+    }
+    for (size_t i = 0; i < t->variable_count; i++) {
+        if (!t->variables[i].as_number)
+            continue;
+        double n = t->variables[i].number;
+        if (n != n || n > DBL_MAX || n < -DBL_MAX) {
+            resend_error_set(client, 0, "validation_error",
+                             "template variable is not a finite number");
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static char *base64_encode(const void *data, size_t len) {
     if (len > (size_t)INT_MAX)
         return NULL;
@@ -127,6 +149,40 @@ static int write_attachments(resend_buf *body, const resend_attachment *attachme
     return resend_json_array_end(body);
 }
 
+static int write_template_variables(resend_buf *body, const resend_template_variable *vars,
+                                    size_t count) {
+    if (resend_json_object_begin(body) != 0)
+        return -1;
+    for (size_t i = 0; i < count; i++) {
+        if (i && resend_json_comma(body) != 0)
+            return -1;
+        if (resend_json_key(body, vars[i].name) != 0)
+            return -1;
+        if (vars[i].as_number) {
+            if (resend_json_number(body, vars[i].number) != 0)
+                return -1;
+        } else if (resend_json_string(body, vars[i].value) != 0) {
+            return -1;
+        }
+    }
+    return resend_json_object_end(body);
+}
+
+static int write_template(resend_buf *body, const resend_template *t) {
+    if (resend_json_object_begin(body) != 0)
+        return -1;
+    int first = 1;
+    if (write_string_field(body, &first, "id", t->id) != 0)
+        return -1;
+    if (t->variable_count > 0) {
+        if (write_field(body, &first, "variables") != 0)
+            return -1;
+        if (write_template_variables(body, t->variables, t->variable_count) != 0)
+            return -1;
+    }
+    return resend_json_object_end(body);
+}
+
 static int write_send_object(const resend_send *message, resend_buf *body) {
     if (resend_json_object_begin(body) != 0)
         return -1;
@@ -169,6 +225,14 @@ static int write_send_object(const resend_send *message, resend_buf *body) {
             return -1;
     }
     if (write_string_field(body, &first, "scheduled_at", message->scheduled_at) != 0)
+        return -1;
+    if (message->template) {
+        if (write_field(body, &first, "template") != 0)
+            return -1;
+        if (write_template(body, message->template) != 0)
+            return -1;
+    }
+    if (write_string_field(body, &first, "topic_id", message->topic_id) != 0)
         return -1;
 
     return resend_json_object_end(body);
@@ -216,6 +280,8 @@ int resend_emails_send(resend *client, const resend_send *message, resend_sent *
     out->id = NULL;
 
     if (reject_missing_arrays(client, message) != 0)
+        return -1;
+    if (reject_template(client, message) != 0)
         return -1;
     if (reject_bad_attachments(client, message->attachments, message->attachment_count) != 0)
         return -1;
@@ -451,6 +517,8 @@ int resend_emails_send_batch(resend *client, const resend_batch *batch, resend_s
     }
     for (size_t i = 0; i < batch->count; i++) {
         if (reject_missing_arrays(client, &batch->messages[i]) != 0)
+            return -1;
+        if (reject_template(client, &batch->messages[i]) != 0)
             return -1;
         if (batch->messages[i].attachment_count > 0) {
             resend_error_set(client, 0, "validation_error", "batch does not accept attachments");

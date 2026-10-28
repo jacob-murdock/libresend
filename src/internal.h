@@ -52,6 +52,8 @@ int resend_json_array_end(resend_buf *b);
 int resend_json_comma(resend_buf *b);
 int resend_json_key(resend_buf *b, const char *key);
 int resend_json_string(resend_buf *b, const char *s);
+/* Finite JSON number. Decimal point is '.'. Non-finite is -1. */
+int resend_json_number(resend_buf *b, double n);
 int resend_json_string_array(resend_buf *b, const char *const *items, size_t count);
 /* Object of string pairs: {"k":"v",...}. */
 int resend_json_pair_object(resend_buf *b, const resend_pair *pairs, size_t count);

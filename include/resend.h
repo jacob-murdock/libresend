@@ -105,6 +105,21 @@ typedef struct {
 
 /* ---- emails ------------------------------------------------------------ */
 
+/* String when as_number is 0 (NULL value writes ""). Number when as_number is nonzero. */
+typedef struct {
+    const char *name;
+    const char *value;
+    double number;
+    int as_number;
+} resend_template_variable;
+
+/* Published template. NULL variables omits that key. */
+typedef struct {
+    const char *id; /* NULL omits the field */
+    const resend_template_variable *variables;
+    size_t variable_count;
+} resend_template;
+
 typedef struct {
     const char *from; /* "Name <email>" or "email" */
     const char *const *to;
@@ -116,7 +131,7 @@ typedef struct {
     const char *const *reply_to;
     size_t reply_to_count;
     const char *subject;
-    const char *html; /* at least one of html or text */
+    const char *html; /* sent when set, including beside a template */
     const char *text;
     const resend_pair *headers;
     size_t header_count;
@@ -126,6 +141,8 @@ typedef struct {
     size_t attachment_count;
     const char *scheduled_at;    /* optional; natural language or ISO 8601 */
     const char *idempotency_key; /* Idempotency-Key header, max 256; not JSON */
+    const resend_template *template; /* NULL omits */
+    const char *topic_id;            /* NULL omits */
 } resend_send;
 
 typedef struct {
