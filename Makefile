@@ -3,9 +3,9 @@
 CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -pthread
 CPPFLAGS += -Iinclude -D_GNU_SOURCE
 
-VERSION := $(shell sed -n 's/^\#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' src/internal.h)
+VERSION := $(shell sed -n 's/^\#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' include/resend.h)
 ifeq ($(VERSION),)
-$(error LIBRESEND_VERSION missing from src/internal.h)
+$(error LIBRESEND_VERSION missing from include/resend.h)
 endif
 
 # dist and clean need only git and sha256sum.

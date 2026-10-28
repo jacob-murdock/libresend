@@ -81,7 +81,7 @@ int resend_download(resend *client, const char *https_url, void **out_bytes, siz
     }
 
     char ua[64];
-    snprintf(ua, sizeof ua, "User-Agent: libresend/%s", LIBRESEND_VERSION);
+    snprintf(ua, sizeof ua, "User-Agent: libresend/%s", resend_version());
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, ua);
     if (!headers) {

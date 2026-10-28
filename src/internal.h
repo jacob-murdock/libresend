@@ -5,7 +5,6 @@
 
 #include <stddef.h>
 
-#define LIBRESEND_VERSION "0.1.0"
 #define LIBRESEND_DEFAULT_BASE "https://api.resend.com"
 #define LIBRESEND_TIMEOUT_SEC 30
 #define LIBRESEND_TIMEOUT_CEILING_SEC 300

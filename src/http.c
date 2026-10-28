@@ -344,7 +344,7 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
         return -1;
     }
     snprintf(auth, auth_len, "Authorization: Bearer %s", client->api_key);
-    snprintf(ua, sizeof ua, "User-Agent: libresend/%s", LIBRESEND_VERSION);
+    snprintf(ua, sizeof ua, "User-Agent: libresend/%s", resend_version());
     if (idempotency_key) {
         size_t idem_len = strlen("Idempotency-Key: ") + strlen(idempotency_key) + 1;
         idem = malloc(idem_len);

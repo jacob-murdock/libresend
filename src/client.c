@@ -79,6 +79,10 @@ void resend_error_from_body(resend *client, int status, const char *body, size_t
     free(message);
 }
 
+const char *resend_version(void) {
+    return LIBRESEND_VERSION;
+}
+
 resend *resend_init(const char *api_key) {
     if (!api_key)
         return NULL;

@@ -12,9 +12,9 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     exit 0
 fi
 
-version=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' src/internal.h)
+version=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' include/resend.h)
 if [ -z "$version" ]; then
-    echo "dist: LIBRESEND_VERSION missing from src/internal.h" >&2
+    echo "dist: LIBRESEND_VERSION missing from include/resend.h" >&2
     exit 1
 fi
 
@@ -54,6 +54,9 @@ need README.md
 need tests/check.c
 need examples/send_email.c
 
-archived=$(tar -xOf "$tarball" "${prefix}src/internal.h" |
+archived=$(tar -xOf "$tarball" "${prefix}include/resend.h" |
     sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p')
 [ "$archived" = "$version" ] || fail "archived version $archived != $version"
+if tar -xOf "$tarball" "${prefix}src/internal.h" | grep -q '^#define LIBRESEND_VERSION '; then
+    fail "src/internal.h defines LIBRESEND_VERSION"
+fi

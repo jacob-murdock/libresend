@@ -23,6 +23,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* resend_version() returns LIBRESEND_VERSION. */
+#define LIBRESEND_VERSION_MAJOR 0
+#define LIBRESEND_VERSION_MINOR 1
+#define LIBRESEND_VERSION_PATCH 0
+#define LIBRESEND_VERSION "0.1.0"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -47,6 +53,8 @@ typedef struct {
     const char *message; /* never NULL; empty string if unknown */
 } resend_error;
 
+/* LIBRESEND_VERSION. The User-Agent is libresend/ plus this string. */
+RESEND_API const char *resend_version(void);
 RESEND_API resend *resend_init(const char *api_key);
 RESEND_API void resend_free(resend *client);
 /* Tests. Production calls api.resend.com. Absolute http:// or https:// only. 0 stored the URL. */

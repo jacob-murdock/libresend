@@ -33,11 +33,6 @@ static int header_eq(fake *f, const char *name, const char *value) {
     return got != NULL && strcmp(got, value) == 0;
 }
 
-static int header_prefix(fake *f, const char *name, const char *prefix) {
-    const char *got = fake_header(f, name);
-    return got != NULL && strncmp(got, prefix, strlen(prefix)) == 0;
-}
-
 static int body_eq(fake *f, const char *want) {
     const char *got = fake_body(f);
     return got != NULL && strcmp(got, want) == 0;
@@ -52,6 +47,20 @@ static resend_send smoke_message(const char *const *to) {
         .text = "Hello from C.",
     };
     return message;
+}
+
+/* Header macros and resend_version() are the same release. */
+static void test_version(void) {
+    char parts[32];
+
+    snprintf(parts, sizeof parts, "%d.%d.%d", LIBRESEND_VERSION_MAJOR, LIBRESEND_VERSION_MINOR,
+             LIBRESEND_VERSION_PATCH);
+    CHECK(LIBRESEND_VERSION_MAJOR == 0);
+    CHECK(LIBRESEND_VERSION_MINOR == 1);
+    CHECK(LIBRESEND_VERSION_PATCH == 0);
+    CHECK(strcmp(LIBRESEND_VERSION, "0.1.0") == 0);
+    CHECK(strcmp(LIBRESEND_VERSION, parts) == 0);
+    CHECK(resend_version() != NULL && strcmp(resend_version(), LIBRESEND_VERSION) == 0);
 }
 
 static void test_send(void) {
@@ -88,8 +97,10 @@ static void test_send(void) {
     CHECK(fake_request_count(f) == 1);
     CHECK(fake_method(f) != NULL && strcmp(fake_method(f), "POST") == 0);
     CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/emails") == 0);
+    char ua[64];
+    snprintf(ua, sizeof ua, "libresend/%s", resend_version());
     CHECK(header_eq(f, "Authorization", "Bearer re_test"));
-    CHECK(header_prefix(f, "User-Agent", "libresend/"));
+    CHECK(header_eq(f, "User-Agent", ua));
     CHECK(header_eq(f, "Accept", "application/json"));
     CHECK(header_eq(f, "Content-Type", "application/json"));
     CHECK(fake_body(f) != NULL &&
@@ -6232,6 +6243,7 @@ int test_limits(void);
 
 int main(void) {
     failures += test_limits();
+    test_version();
     test_send();
     test_set_base_url();
     test_error_body();

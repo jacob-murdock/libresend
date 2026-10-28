@@ -8,9 +8,9 @@ root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$root"
 make_bin=${1:-make}
 
-version=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' src/internal.h)
+version=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' include/resend.h)
 if [ -z "$version" ]; then
-    echo "install: LIBRESEND_VERSION missing from src/internal.h" >&2
+    echo "install: LIBRESEND_VERSION missing from include/resend.h" >&2
     exit 1
 fi
 
@@ -58,6 +58,7 @@ fi
 # Only the public API is exported. Internals stay hidden.
 syms=$(nm -D --defined-only "$so" | awk '{print $NF}')
 printf '%s\n' "$syms" | grep -q -x 'resend_init' || fail "resend_init is not exported"
+printf '%s\n' "$syms" | grep -q -x 'resend_version' || fail "resend_version is not exported"
 if printf '%s\n' "$syms" | grep -E -q '^(json_|resend_json_|resend_buf_|resend_http_|resend_error_|resend_path_|resend_ascii_|resend_attachment_get|resend_attachments_list)'; then
     fail "internal symbols are exported"
 fi
@@ -87,7 +88,10 @@ printf '%s\n' "$static_libs" | grep -q -- '-lssl' || fail "--static --libs omits
 
 cat > "$work/smoke.c" <<'EOF'
 #include <resend.h>
+#include <string.h>
 int main(void) {
+    if (!resend_version() || strcmp(resend_version(), LIBRESEND_VERSION) != 0)
+        return 1;
     resend_free(NULL);
     return 0;
 }

@@ -29,10 +29,10 @@ jobs:
         id: meta
         run: |
           set -eu
-          matches=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' src/internal.h)
+          matches=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' include/resend.h)
           n=$(printf '%s\n' "$matches" | grep -c . || true)
           if [ "$n" != 1 ]; then
-            echo "::error::LIBRESEND_VERSION must appear exactly once in src/internal.h"
+            echo "::error::LIBRESEND_VERSION must appear exactly once in include/resend.h"
             exit 1
           fi
           version=$matches
