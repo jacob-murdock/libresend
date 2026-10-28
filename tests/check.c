@@ -897,8 +897,40 @@ static void test_send_attachment_both(void) {
     CHECK(fake_request_count(f) == 0);
     const resend_error *err = resend_last_error(client);
     CHECK(err != NULL && err->status == 0);
-    CHECK(err->message != NULL && err->message[0] != '\0');
+    CHECK(err->message != NULL && strcmp(err->message, "attachment has both content and path") == 0);
 
+    const resend_attachment neither = {.filename = "empty.txt"};
+    message.attachments = &neither;
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err->message != NULL && strcmp(err->message, "attachment needs content or path") == 0);
+
+    /* A count with a NULL array is rejected before the writers index it. */
+    message.attachments = NULL;
+    message.attachment_count = 0;
+    message.to = NULL;
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err->name != NULL && strcmp(err->name, "missing_required_field") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "missing to") == 0);
+
+    message.to = to;
+    message.tag_count = 1;
+    CHECK(resend_emails_send(client, &message, &sent) == -1);
+    err = resend_last_error(client);
+    CHECK(err->message != NULL && strcmp(err->message, "missing tags") == 0);
+
+    message.tag_count = 0;
+    message.cc_count = 2;
+    const resend_send batch_messages[] = {message};
+    resend_batch batch = {.messages = batch_messages, .count = 1};
+    resend_sent_list list = {0};
+    CHECK(resend_emails_send_batch(client, &batch, &list) == -1);
+    err = resend_last_error(client);
+    CHECK(err->message != NULL && strcmp(err->message, "missing cc") == 0);
+    CHECK(fake_request_count(f) == 0);
+
+    resend_sent_list_free(&list);
     resend_sent_free(&sent);
     resend_free(client);
     fake_stop(f);

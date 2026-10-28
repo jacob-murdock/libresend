@@ -44,11 +44,34 @@ static int reject_bad_attachments(resend *client, const resend_attachment *attac
     }
     for (size_t i = 0; i < count; i++) {
         if (!attachment_mode_ok(&attachments[i])) {
-            resend_error_set(client, 0, "validation_error", "attachment needs content or path, not both");
+            resend_error_set(client, 0, "validation_error",
+                             attachments[i].content ? "attachment has both content and path"
+                                                    : "attachment needs content or path");
             return -1;
         }
     }
     return 0;
+}
+
+/* The JSON writers index these arrays by count, so a NULL array with a count would crash. */
+static int reject_missing_arrays(resend *client, const resend_send *m) {
+    const char *missing = NULL;
+    if (m->to_count > 0 && !m->to)
+        missing = "missing to";
+    else if (m->cc_count > 0 && !m->cc)
+        missing = "missing cc";
+    else if (m->bcc_count > 0 && !m->bcc)
+        missing = "missing bcc";
+    else if (m->reply_to_count > 0 && !m->reply_to)
+        missing = "missing reply_to";
+    else if (m->header_count > 0 && !m->headers)
+        missing = "missing headers";
+    else if (m->tag_count > 0 && !m->tags)
+        missing = "missing tags";
+    if (!missing)
+        return 0;
+    resend_error_set(client, 0, "missing_required_field", missing);
+    return -1;
 }
 
 static char *base64_encode(const void *data, size_t len) {
@@ -191,6 +214,8 @@ int resend_emails_send(resend *client, const resend_send *message, resend_sent *
     }
     out->id = NULL;
 
+    if (reject_missing_arrays(client, message) != 0)
+        return -1;
     if (reject_bad_attachments(client, message->attachments, message->attachment_count) != 0)
         return -1;
     if (message->idempotency_key && strlen(message->idempotency_key) > 256) {
@@ -339,6 +364,8 @@ int resend_emails_send_batch(resend *client, const resend_batch *batch, resend_s
         return -1;
     }
     for (size_t i = 0; i < batch->count; i++) {
+        if (reject_missing_arrays(client, &batch->messages[i]) != 0)
+            return -1;
         if (batch->messages[i].attachment_count > 0) {
             resend_error_set(client, 0, "validation_error", "batch does not accept attachments");
             return -1;
