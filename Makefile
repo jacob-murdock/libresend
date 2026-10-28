@@ -18,10 +18,13 @@ CPPFLAGS += $(shell pkg-config --cflags libcurl openssl)
 endif
 
 PREFIX ?= /usr/local
+# Override for lib64. install, uninstall, and the .pc libdir use this.
+LIBDIR ?= $(PREFIX)/lib
 
 BUILD := build
 LIB   := $(BUILD)/libresend.a
-SO    := $(BUILD)/libresend.so.0
+SO_NAME := libresend.so.$(VERSION)
+SO    := $(BUILD)/$(SO_NAME)
 CHECK := $(BUILD)/check
 HEADER_C99 := $(BUILD)/header_c99.o
 
@@ -36,7 +39,7 @@ EXAMPLES := send_email send_batch_email schedule_email with_attachments \
 	receiving domains api_keys webhook
 EXAMPLE_BINS := $(addprefix $(BUILD)/examples/,$(EXAMPLES))
 
-.PHONY: all check examples clean install dist
+.PHONY: all check examples clean install uninstall dist
 
 all: $(LIB)
 
@@ -88,16 +91,18 @@ $(BUILD)/examples/%: examples/%.c include/resend.h $(LIB) | $(BUILD)/examples
 
 examples: $(EXAMPLE_BINS)
 
-install: $(SO)
-	install -d $(DESTDIR)$(PREFIX)/lib/pkgconfig $(DESTDIR)$(PREFIX)/include
-	install -m 755 $(SO) $(DESTDIR)$(PREFIX)/lib/libresend.so.0
-	ln -sfn libresend.so.0 $(DESTDIR)$(PREFIX)/lib/libresend.so
+install: $(LIB) $(SO)
+	install -d $(DESTDIR)$(LIBDIR)/pkgconfig $(DESTDIR)$(PREFIX)/include
+	install -m 644 $(LIB) $(DESTDIR)$(LIBDIR)/libresend.a
+	install -m 755 $(SO) $(DESTDIR)$(LIBDIR)/$(SO_NAME)
+	ln -sfn $(SO_NAME) $(DESTDIR)$(LIBDIR)/libresend.so.0
+	ln -sfn libresend.so.0 $(DESTDIR)$(LIBDIR)/libresend.so
 	install -m 644 include/resend.h $(DESTDIR)$(PREFIX)/include/resend.h
 	@{ \
 	  printf '%s\n' \
 	    'prefix=$(PREFIX)' \
 	    'exec_prefix=$${prefix}' \
-	    'libdir=$${exec_prefix}/lib' \
+	    'libdir=$${exec_prefix}/$(patsubst $(PREFIX)/%,%,$(LIBDIR))' \
 	    'includedir=$${prefix}/include' \
 	    '' \
 	    'Name: libresend' \
@@ -106,8 +111,16 @@ install: $(SO)
 	    'Requires.private: libcurl openssl' \
 	    'Libs: -L$${libdir} -lresend' \
 	    'Cflags: -I$${includedir}'; \
-	} > $(DESTDIR)$(PREFIX)/lib/pkgconfig/libresend.pc
-	chmod 644 $(DESTDIR)$(PREFIX)/lib/pkgconfig/libresend.pc
+	} > $(DESTDIR)$(LIBDIR)/pkgconfig/libresend.pc
+	chmod 644 $(DESTDIR)$(LIBDIR)/pkgconfig/libresend.pc
+
+uninstall:
+	rm -f $(DESTDIR)$(LIBDIR)/libresend.a \
+		$(DESTDIR)$(LIBDIR)/libresend.so \
+		$(DESTDIR)$(LIBDIR)/libresend.so.0 \
+		$(DESTDIR)$(LIBDIR)/$(SO_NAME) \
+		$(DESTDIR)$(LIBDIR)/pkgconfig/libresend.pc \
+		$(DESTDIR)$(PREFIX)/include/resend.h
 
 DIST_TAR := $(BUILD)/libresend-$(VERSION).tar.gz
 DIST_SUM := $(DIST_TAR).sha256
