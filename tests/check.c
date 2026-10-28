@@ -1145,7 +1145,8 @@ static resend *client_on(fake *f) {
 }
 
 /* Id is one path segment. Slash, space, newline, and '?' stay in the segment.
- * ".." is not squashed. Subject escapes cover a BMP character and an emoji pair. */
+ * `.` and `..` are refused, including %2e. Subject escapes cover a BMP character
+ * and an emoji pair. */
 static void test_emails_id_path(void) {
     static const char body[] =
         "{\"id\":\"a/b c\\n?\","
@@ -1193,9 +1194,7 @@ static void test_emails_id_path(void) {
     resend_free(client);
     fake_stop(f);
 
-    static const char dotdot_body[] = "{\"id\":\"..\"}";
-    fake_exchange dotdot = {.status = 200, .body = dotdot_body};
-    f = fake_start(&dotdot, 1);
+    f = fake_start(&exchange, 1);
     CHECK(f != NULL);
     if (!f)
         return;
@@ -1205,11 +1204,20 @@ static void test_emails_id_path(void) {
         fake_stop(f);
         return;
     }
+    static const char *const dots[] = {".", "..", "%2e", "%2E%2e"};
+    for (size_t i = 0; i < sizeof dots / sizeof dots[0]; i++) {
+        memset(&email, 0, sizeof email);
+        rc = resend_emails_get(client, dots[i], &email);
+        CHECK(rc == -1);
+        CHECK(email.id == NULL);
+        const resend_error *err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 0);
+        CHECK(err->message != NULL && strcmp(err->message, "id cannot be . or ..") == 0);
+    }
     memset(&email, 0, sizeof email);
-    rc = resend_emails_get(client, "..", &email);
-    CHECK(rc == 0);
-    CHECK(fake_path(f) != NULL && strcmp(fake_path(f), "/emails/..") == 0);
-    CHECK(email.id != NULL && strcmp(email.id, "..") == 0);
+    rc = resend_emails_cancel(client, "..", &email);
+    CHECK(rc == -1);
+    CHECK(fake_request_count(f) == 0);
     resend_email_free(&email);
     resend_free(client);
     fake_stop(f);

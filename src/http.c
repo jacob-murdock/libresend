@@ -80,6 +80,27 @@ oom:
     return -1;
 }
 
+/* Literal `.` and `..` are the real risk: dot is unreserved, so put_pct
+ * leaves them as a path segment. `%2e` becomes `%252e` and cannot decode
+ * to a dot here; that part is defensive, matching Node. */
+static int is_dot_segment(const char *id) {
+    int n = 0;
+    for (const unsigned char *p = (const unsigned char *)id; *p;) {
+        if (*p == '.') {
+            n++;
+            p++;
+        } else if (p[0] == '%' && p[1] == '2' && (p[2] == 'e' || p[2] == 'E')) {
+            n++;
+            p += 3;
+        } else {
+            return 0;
+        }
+        if (n > 2)
+            return 0;
+    }
+    return n == 1 || n == 2;
+}
+
 int resend_path_with_id(resend *client, const char *prefix, const char *id, const char *suffix,
                         char **out) {
     if (!out)
@@ -87,6 +108,10 @@ int resend_path_with_id(resend *client, const char *prefix, const char *id, cons
     *out = NULL;
     if (!client || !prefix || !id)
         return -1;
+    if (is_dot_segment(id)) {
+        resend_error_set(client, 0, NULL, "id cannot be . or ..");
+        return -1;
+    }
 
     resend_buf path;
     resend_buf_init(&path);
@@ -237,7 +262,7 @@ int resend_http_json(resend *client, const char *method, const char *path, const
     struct header_ctx hctx = {.drop_to_http = 0};
 
     curl_easy_setopt(easy, CURLOPT_URL, url);
-    /* Email ids are one path segment. Do not let curl squash "." or "..". */
+    /* Ids that are `.` or `..` are already rejected. Keep the path we built. */
     curl_easy_setopt(easy, CURLOPT_PATH_AS_IS, 1L);
     curl_easy_setopt(easy, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(easy, CURLOPT_CUSTOMREQUEST, method);

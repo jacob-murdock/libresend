@@ -106,7 +106,8 @@ int resend_path_with_page(resend *client, const char *prefix, const resend_page 
 
 /*
  * prefix + one percent-encoded path segment + optional suffix (NULL omits it).
- * *out is malloc'd. Failure sets the error slot.
+ * Rejects an id that is `.` or `..` (and %2e forms). *out is malloc'd.
+ * Failure sets the error slot.
  */
 int resend_path_with_id(resend *client, const char *prefix, const char *id, const char *suffix,
                         char **out);
