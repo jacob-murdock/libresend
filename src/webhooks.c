@@ -260,6 +260,11 @@ int resend_webhook_verify(const char *secret, const char *svix_id, const char *s
     }
     webhook_err(err, "");
 
+    if (body_len > RESEND_WEBHOOK_BODY_MAX) {
+        webhook_err(err, "webhook body too large");
+        return -1;
+    }
+
     int64_t ts = 0;
     if (parse_timestamp(svix_timestamp, &ts) != 0) {
         webhook_err(err, "invalid timestamp");

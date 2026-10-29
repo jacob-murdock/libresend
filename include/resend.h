@@ -328,12 +328,16 @@ typedef struct {
     char *data_json;   /* NULL if data is omitted; otherwise the "data" object */
 } resend_event;
 
+/* Raw body. A larger length is rejected before the signature is computed. */
+#define RESEND_WEBHOOK_BODY_MAX ((size_t)1024 * 1024)
+
 /*
  * secret is the signing secret. A "whsec_" prefix is stripped when present.
  * svix_signature may contain more than one space-separated "v1," value.
- * Rejects a timestamp outside five minutes of now. Callers that need
- * once-only delivery record svix ids themselves.
- * On success, *out is filled and must be passed to resend_event_free.
+ * Rejects a timestamp outside five minutes of now, and a body larger than
+ * RESEND_WEBHOOK_BODY_MAX. Callers that need once-only delivery record svix
+ * ids themselves. On success, *out is filled and must be passed to
+ * resend_event_free.
  */
 RESEND_API int resend_webhook_verify(const char *secret, const char *svix_id,
                                      const char *svix_timestamp, const char *svix_signature,

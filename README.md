@@ -65,7 +65,7 @@ Attachments on the email have no download URL. `resend_receiving_attachments_lis
 
 ## Webhooks
 
-Verification does not use an API key. Pass the raw body and the `svix-id`, `svix-timestamp`, and `svix-signature` headers. Do not re-serialize the JSON first. The signed payload is `id.timestamp.body`. A timestamp more than five minutes from now is rejected. Callers that need once-only delivery record `svix-id` values themselves.
+Verification does not use an API key. Pass the raw body and the `svix-id`, `svix-timestamp`, and `svix-signature` headers. Do not re-serialize the JSON first. The signed payload is `id.timestamp.body`. A timestamp more than five minutes from now is rejected. A body larger than 1 MiB is rejected. Callers that need once-only delivery record `svix-id` values themselves.
 
 ```c
 resend_event event = {0};

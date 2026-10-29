@@ -26,6 +26,8 @@ int main(int argc, char **argv)
     }
 
     size_t cap = 4096;
+    if (cap > RESEND_WEBHOOK_BODY_MAX)
+        cap = RESEND_WEBHOOK_BODY_MAX;
     size_t len = 0;
     char *body = malloc(cap);
     if (!body) {
@@ -33,15 +35,28 @@ int main(int argc, char **argv)
         return 1;
     }
     for (;;) {
+        if (len == RESEND_WEBHOOK_BODY_MAX) {
+            char extra;
+            size_t n = fread(&extra, 1, 1, stdin);
+            if (ferror(stdin))
+                break;
+            if (n != 0) {
+                free(body);
+                fprintf(stderr, "webhook body too large\n");
+                return 1;
+            }
+            break;
+        }
         if (len == cap) {
-            cap *= 2;
-            char *n = realloc(body, cap);
-            if (!n) {
+            size_t ncap = cap > RESEND_WEBHOOK_BODY_MAX / 2 ? RESEND_WEBHOOK_BODY_MAX : cap * 2;
+            char *grown = realloc(body, ncap);
+            if (!grown) {
                 free(body);
                 fprintf(stderr, "out of memory\n");
                 return 1;
             }
-            body = n;
+            body = grown;
+            cap = ncap;
         }
         size_t n = fread(body + len, 1, cap - len, stdin);
         len += n;

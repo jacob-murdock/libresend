@@ -2972,6 +2972,41 @@ static void test_webhook_verify(void) {
     rc = resend_webhook_verify(secret, svix_id, "12ab", "v1,aa", body, strlen(body), &event, &err);
     CHECK(rc == -1);
     CHECK(strcmp(err.message, "invalid timestamp") == 0);
+
+    /* The length is rejected before the body is read. max itself still verifies. */
+    char tiny = '{';
+    memset(&event, 0, sizeof event);
+    memset(&err, 0, sizeof err);
+    rc = resend_webhook_verify(secret, svix_id, "1", "v1,aa", &tiny, RESEND_WEBHOOK_BODY_MAX + 1,
+                               &event, &err);
+    CHECK(rc == -1);
+    CHECK(event.type == NULL);
+    CHECK(strcmp(err.message, "webhook body too large") == 0);
+
+    char *big = malloc(RESEND_WEBHOOK_BODY_MAX);
+    CHECK(big != NULL);
+    if (big) {
+        static const char prefix[] = "{\"type\":\"email.sent\",\"pad\":\"";
+        static const char suffix[] = "\"}";
+        memset(big, 'a', RESEND_WEBHOOK_BODY_MAX);
+        memcpy(big, prefix, sizeof prefix - 1);
+        memcpy(big + RESEND_WEBHOOK_BODY_MAX - (sizeof suffix - 1), suffix, sizeof suffix - 1);
+        now = (long)time(NULL);
+        sig = sign_v1(secret, svix_id, now, big, RESEND_WEBHOOK_BODY_MAX);
+        CHECK(sig != NULL);
+        if (sig) {
+            snprintf(ts, sizeof ts, "%ld", now);
+            memset(&event, 0, sizeof event);
+            memset(&err, 0, sizeof err);
+            rc = resend_webhook_verify(secret, svix_id, ts, sig, big, RESEND_WEBHOOK_BODY_MAX,
+                                       &event, &err);
+            CHECK(rc == 0);
+            CHECK(event.type != NULL && strcmp(event.type, "email.sent") == 0);
+            resend_event_free(&event);
+            free(sig);
+        }
+        free(big);
+    }
 }
 
 /*
