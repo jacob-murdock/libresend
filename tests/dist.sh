@@ -5,6 +5,9 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$root"
+# shellcheck disable=SC1091
+. "$root/tests/cflags.sh"
+drop_caller_cflags
 make_bin=${1:-make}
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

@@ -7,6 +7,9 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$root"
+# shellcheck disable=SC1091
+. "$root/tests/cflags.sh"
+drop_caller_cflags
 make_bin=${1:-make}
 
 version=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' include/resend.h)

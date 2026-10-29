@@ -8,6 +8,9 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$root"
+# shellcheck disable=SC1091
+. "$root/tests/cflags.sh"
+drop_caller_cflags
 make_bin=${1:-make}
 
 version=$(sed -n 's/^#define LIBRESEND_VERSION "\([^"]*\)".*/\1/p' include/resend.h)
@@ -36,7 +39,14 @@ expect_tree() {
     fi
 }
 
-"$make_bin" install DESTDIR="$stage" PREFIX=/usr
+# Make will not rebuild objects when CFLAGS changes. A caller override
+# (the sanitizer job) has already compiled the archive; rebuild so the
+# files installed here are the default-flag library.
+if [ "$caller_cflags" = 1 ]; then
+    "$make_bin" -B install DESTDIR="$stage" PREFIX=/usr
+else
+    "$make_bin" install DESTDIR="$stage" PREFIX=/usr
+fi
 
 lib="$stage/usr/lib"
 expected="usr
