@@ -114,6 +114,70 @@ void resend_free(resend *client) {
     free(client);
 }
 
+/* Digits only, and at least one. The authority ends before this is called. */
+static int port_digits(const char *p, const char *end) {
+    if (p >= end)
+        return 0;
+    for (; p < end; p++) {
+        if (*p < '0' || *p > '9')
+            return 0;
+    }
+    return 1;
+}
+
+/*
+ * Cleartext http:// is only the loopback fake. The host is the authority
+ * after the last '@', so userinfo cannot aim the request at another machine.
+ * 127.0.0.1, localhost, or bracketed ::1. A port, when present, is digits.
+ */
+static int http_loopback(const char *url, size_t n) {
+    if (n < 7 || resend_ascii_ncasecmp(url, "http://", 7) != 0)
+        return 0;
+    const char *auth = url + 7;
+    const char *auth_end = url + n;
+    for (const char *p = auth; p < auth_end; p++) {
+        if (*p == '/' || *p == '?' || *p == '#') {
+            auth_end = p;
+            break;
+        }
+    }
+    if (auth == auth_end)
+        return 0;
+
+    const char *host = auth;
+    for (const char *p = auth; p < auth_end; p++) {
+        if (*p == '@')
+            host = p + 1;
+    }
+    if (host >= auth_end)
+        return 0;
+
+    const char *host_end;
+    if (*host == '[') {
+        const char *rb = host + 1;
+        while (rb < auth_end && *rb != ']')
+            rb++;
+        if (rb >= auth_end || (size_t)(rb - (host + 1)) != 3 || memcmp(host + 1, "::1", 3) != 0)
+            return 0;
+        host_end = rb + 1;
+    } else {
+        host_end = host;
+        while (host_end < auth_end && *host_end != ':')
+            host_end++;
+        size_t hlen = (size_t)(host_end - host);
+        int v4 = hlen == 9 && memcmp(host, "127.0.0.1", 9) == 0;
+        int local = hlen == 9 && resend_ascii_ncasecmp(host, "localhost", 9) == 0;
+        if (!v4 && !local)
+            return 0;
+    }
+
+    if (host_end == auth_end)
+        return 1;
+    if (*host_end != ':')
+        return 0;
+    return port_digits(host_end + 1, auth_end);
+}
+
 int resend_set_base_url(resend *client, const char *base_url) {
     if (!client)
         return -1;
@@ -129,9 +193,14 @@ int resend_set_base_url(resend *client, const char *base_url) {
         resend_error_set(client, 0, "missing_required_field", "base url is required");
         return -1;
     }
-    if (!((n >= 8 && resend_ascii_ncasecmp(base_url, "https://", 8) == 0) ||
-          (n >= 7 && resend_ascii_ncasecmp(base_url, "http://", 7) == 0))) {
+    int https = n >= 8 && resend_ascii_ncasecmp(base_url, "https://", 8) == 0;
+    int http = !https && n >= 7 && resend_ascii_ncasecmp(base_url, "http://", 7) == 0;
+    if (!https && !http) {
         resend_error_set(client, 0, "validation_error", "base url must be http or https");
+        return -1;
+    }
+    if (http && !http_loopback(base_url, n)) {
+        resend_error_set(client, 0, "validation_error", "http base url must be loopback");
         return -1;
     }
     char *copy = malloc(n + 1);

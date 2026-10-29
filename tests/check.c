@@ -171,6 +171,21 @@ static void test_set_base_url(void) {
     CHECK(resend_set_base_url(client, "///") == -1);
     err = resend_last_error(client);
     CHECK(err != NULL && err->message != NULL && strcmp(err->message, "base url is required") == 0);
+
+    /* Cleartext http:// is the loopback fake only. A rejection leaves the stored URL. */
+    CHECK(resend_set_base_url(client, "http://example.com") == -1);
+    err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->name != NULL && strcmp(err->name, "validation_error") == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "http base url must be loopback") == 0);
+    CHECK(resend_set_base_url(client, "http://api.resend.com") == -1);
+    CHECK(resend_set_base_url(client, "http://127.0.0.1.evil.com") == -1);
+    CHECK(resend_set_base_url(client, "http://127.0.0.1@evil.com") == -1);
+    CHECK(resend_set_base_url(client, "http://127.0.0.1:80@evil.com") == -1);
+    CHECK(resend_set_base_url(client, "http://2130706433") == -1);
+    CHECK(resend_set_base_url(client, "http://127.1") == -1);
+    CHECK(resend_set_base_url(client, "http://[::ffff:127.0.0.1]") == -1);
+    CHECK(resend_set_base_url(client, "http://127.0.0.1:1\r\nX: y") == -1);
     CHECK(fake_request_count(f) == 0);
 
     const char *const to[] = {"you@example.com"};
@@ -182,6 +197,17 @@ static void test_set_base_url(void) {
     CHECK(fake_request_count(f) == 1);
 
     resend_sent_free(&sent);
+
+    /* https:// may name any host. These stores do not send. */
+    CHECK(resend_set_base_url(client, "https://example.com") == 0);
+    CHECK(resend_set_base_url(client, "https://example.com/") == 0);
+    CHECK(resend_set_base_url(client, "http://localhost:9") == 0);
+    CHECK(resend_set_base_url(client, "http://LOCALHOST") == 0);
+    CHECK(resend_set_base_url(client, "HTTP://127.0.0.1:1") == 0);
+    CHECK(resend_set_base_url(client, "http://[::1]:9") == 0);
+    CHECK(resend_set_base_url(client, "http://user@127.0.0.1:9") == 0);
+    CHECK(fake_request_count(f) == 1);
+
     resend_free(client);
     fake_stop(f);
 }
@@ -1686,7 +1712,8 @@ static void test_emails_send_batch(void) {
         resend_free(bad_key);
     }
 
-    CHECK(resend_set_base_url(client, "http://127.0.0.1:1\r\nX: y") == 0);
+    /* https still stores a control character; the call refuses it and sends nothing. */
+    CHECK(resend_set_base_url(client, "https://example.com\r\nX: y") == 0);
     resend_batch plain = {.messages = &injected, .count = 1};
     rc = resend_emails_send_batch(client, &plain, &sent);
     CHECK(rc == -1);
