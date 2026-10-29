@@ -1,5 +1,5 @@
 /*
- * Verify a Resend webhook the same way the README shows. Reads
+ * Verify a Resend webhook. Reads
  * RESEND_WEBHOOK_SECRET, Svix headers from argv, and the raw body from stdin.
  * Does not use an API key and does not listen on a port.
  *

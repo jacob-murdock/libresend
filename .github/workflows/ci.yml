@@ -1,5 +1,5 @@
 # make check against the loopback fake. No Resend API key.
-# macOS, Windows, and C99 jobs compile the static library only.
+# macOS, Windows, and pedantic C99 jobs compile the static library only.
 name: CI
 
 on:
@@ -53,7 +53,7 @@ jobs:
     timeout-minutes: 15
     env:
       CC: gcc
-      CFLAGS: -std=c11 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -O1
+      CFLAGS: -std=c99 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -O1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

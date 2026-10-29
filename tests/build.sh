@@ -33,7 +33,7 @@ lack() {
 obj=$("$make_bin" -n -B build/buf.o) || fail "dry-run object"
 obj_line=$(printf '%s\n' "$obj" | grep -F ' -c src/buf.c -o build/buf.o')
 [ -n "$obj_line" ] || fail "no object compile line"
-need "$obj_line" "-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -std=c11 -Wall -Wextra -Werror -pthread -O2 -fstack-protector-strong" \
+need "$obj_line" "-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -std=c99 -Wall -Wextra -Werror -pthread -O2 -fstack-protector-strong" \
     "default object flags"
 lack "$obj_line" "relro" "relro on an object compile"
 

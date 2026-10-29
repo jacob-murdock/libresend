@@ -1,6 +1,6 @@
 # libresend. The shared library links libcurl and OpenSSL; it does not ship them.
 
-CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pthread -O2
+CFLAGS ?= -std=c99 -Wall -Wextra -Werror -pthread -O2
 # Command-line CFLAGS replaces the line above. This still applies.
 override CFLAGS += -fstack-protector-strong
 CPPFLAGS += -Iinclude -D_GNU_SOURCE

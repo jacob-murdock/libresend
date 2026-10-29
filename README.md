@@ -1,26 +1,41 @@
 # libresend
 
-Unofficial C client for the [Resend](https://resend.com) API. Not a Resend product, and not affiliated.
+Unofficial C client for the [Resend](https://resend.com) API. Not a Resend product, and not affiliated. Explore Resend's [official SDK page](https://resend.com/docs/sdks).
 
-[Official SDKs](https://resend.com/docs/sdks) cover Node.js, PHP, Python, Ruby, Go, Java, Rust, and .NET. There is no official C SDK. This library is the part a C program needs: send mail, read what was sent, verify a webhook, read mail Resend received, and manage the domains, API keys, logs, and suppressions that mail depends on.
-
-The interface is [`include/resend.h`](include/resend.h). Names follow the [Resend API](https://resend.com/docs/api-reference/introduction) and [resend-openapi](https://github.com/resend/resend-openapi). Calls land in that order.
+A C program can send mail, read what was sent, verify a webhook, and read mail Resend received. It can also manage the domains, API keys, logs, and suppressions that mail depends on. The interface is [`include/resend.h`](include/resend.h). Names follow the [Resend API](https://resend.com/docs/api-reference/introduction) and [resend-openapi](https://github.com/resend/resend-openapi).
 
 ## Build
 
-Portable C (C99 features, built as C11) on libcurl and OpenSSL. Tested on Linux. The Makefile's install target is Linux; the library compiles in CI on macOS and Windows (MinGW). `pkg-config` names: `libcurl`, `openssl`.
+C99, on libcurl and OpenSSL. Tested on Linux. `make install` targets Linux; the library also compiles on macOS and Windows (MinGW). `pkg-config` names: `libcurl`, `openssl`.
+
+libcurl 7.85 or newer is the current baseline. An older libcurl still links.
 
 ```bash
 make
 make check
 ```
 
-`make` builds `build/libresend.a`. `make check` runs the suite against a loopback fake in the test process. It does not call Resend. `make examples` builds `build/examples/` and is not part of `make check`. `make install` lands with the pkg-config file. `make dist` writes the versioned tarball and SHA-256 file from `git archive` of `HEAD`, and a matching `v*` tag publishes that pair. A tag whose version contains `-` is a prerelease. The release is source only.
+`make` builds `build/libresend.a`. `make check` runs the suite against a loopback fake in the test process. It does not call Resend. It also compiles the public header under `-pedantic` and runs the build, install, and dist scripts.
+
+`make install` copies the static library, the shared library (soname `libresend.so.0`), `include/resend.h`, and `libresend.pc` under `PREFIX` (`/usr/local`). `make uninstall` removes that set.
+
+`make examples` builds the programs in [`examples/`](examples/). It is separate from `make check`.
+
+Releases are source tarballs from `make dist`.
 
 ## Send
 
 ```c
-resend *c = resend_init(getenv("RESEND_API_KEY"));
+const char *key = getenv("RESEND_API_KEY");
+if (!key || !key[0]) {
+    fprintf(stderr, "RESEND_API_KEY is required\n");
+    return 1;
+}
+resend *c = resend_init(key);
+if (!c) {
+    fprintf(stderr, "resend_init failed\n");
+    return 1;
+}
 const char *to[] = { "delivered@resend.dev" };
 resend_send req = {
     .from = "Acme <onboarding@resend.dev>",
@@ -32,96 +47,46 @@ resend_send req = {
 };
 resend_sent sent = {0};
 if (resend_emails_send(c, &req, &sent) != 0) {
-    const resend_error *e = resend_last_error(c);
-    fprintf(stderr, "%s\n", e->message);
+    fprintf(stderr, "%s\n", resend_last_error(c)->message);
+    resend_free(c);
+    return 1;
 }
 printf("%s\n", sent.id);
 resend_sent_free(&sent);
 resend_free(c);
 ```
 
-A display name is part of the address string, as `Name <email>`. `to`, `cc`, `bcc`, and `reply_to` are arrays of those strings. Resend rejects recipients on domains such as `example.com`. Without a verified domain, send from `onboarding@resend.dev` to `delivered@resend.dev`, `bounced@resend.dev`, `complained@resend.dev`, or `suppressed@resend.dev`. `Idempotency-Key` is a request header, at most 256 characters, and it expires after 24 hours. `scheduled_at` is natural language (`in 1 min`) or ISO 8601. An attachment is raw bytes or a `path` URL. `template` is a published template id plus variables, each a string or a number. NULL omits the template, and a NULL variables pointer omits that object. `topic_id` is optional and omitted when NULL. `html` and `text` are still sent when they are set.
+A display name is part of the address string, as `Name <email>`. Without a verified domain, send from `onboarding@resend.dev` to `delivered@resend.dev`, `bounced@resend.dev`, `complained@resend.dev`, or `suppressed@resend.dev`. Resend rejects recipients on domains such as `example.com`.
 
-`resend_emails_send_batch` sends up to 100 messages in one call and uses the batch's idempotency key. `validation` is `strict` or `permissive`, sent as `x-batch-validation`. NULL omits that header. Strict is the API default: one invalid message fails the batch. Permissive sends the valid messages, and the result is those ids. `resend_emails_get` and `resend_emails_list` return the stored message, including `message_id`, `last_event`, and `scheduled_at`. Get also fills tags. A get in the moment after send can return `not_found` until that record is visible. A scheduled send can report `last_event` `queued` before `scheduled`, and cancel fails with `Email is not scheduled` until then. `resend_emails_update` changes `scheduled_at` on a scheduled send and returns the id. `resend_emails_cancel` cancels a scheduled send and returns that message.
+The other programs in [`examples/`](examples/) cover the rest of the library:
 
-`resend_emails_attachments_list` and `resend_emails_attachment_get` return attachments of a sent email. The type is the same one receiving uses, including `download_url` and `expires_at`. `resend_download` fetches that URL.
-
-## Receiving
-
-```c
-resend_received email = {0};
-if (resend_receiving_get(c, email_id, "cid", &email) != 0) {
-    const resend_error *e = resend_last_error(c);
-    fprintf(stderr, "%s\n", e->message);
-}
-resend_received_free(&email);
-```
-
-`html_format` is `data_uri` or `cid`. `data_uri` inlines images. `cid` keeps `cid:` references that match an attachment `content_id`. A message too large to inline comes back as `cid` either way; the response field says which.
-
-List results carry the envelope and attachment metadata. Get also fills `html`, `text`, `headers`, `received_for`, `authentication`, and `raw`. `authentication` is the SPF, DKIM, and DMARC result Resend computed. `html_format=data_uri` can be large. Inlined HTML can reach 100 MB before Resend falls back to `cid:` references, so get allows 128 MiB.
-
-Attachments on the email have no download URL. `resend_receiving_attachments_list` and `resend_receiving_attachment_get` return a signed `download_url` and `expires_at`. `resend_download` GETs that HTTPS URL, or `raw.download_url`, and follows redirects that stay on HTTPS. It honors proxy environment variables. The call fails past 64 MiB instead of buffering without limit. A 30-second stall aborts the transfer, and a 300-second ceiling stops a slow drip. Receiving get and logs get use that same deadline.
-
-## Webhooks
-
-Verification does not use an API key. Pass the raw body and the `svix-id`, `svix-timestamp`, and `svix-signature` headers. Do not re-serialize the JSON first. The signed payload is `id.timestamp.body`. A timestamp more than five minutes from now is rejected. A body larger than 1 MiB is rejected, as is an id longer than 256 bytes, a signature header longer than 4096 bytes, or a secret longer than 256 bytes. Callers that need once-only delivery record `svix-id` values themselves.
-
-```c
-resend_event event = {0};
-resend_error err = {0};
-if (resend_webhook_verify(secret, svix_id, svix_timestamp, svix_signature,
-                          body, body_len, &event, &err) != 0) {
-    fprintf(stderr, "%s\n", err.message);
-}
-/* event.type is "email.received", "email.sent", and the other event names. */
-resend_event_free(&event);
-```
-
-`email_id` is set when the payload has one. The rest of `data` stays in `data_json`.
-
-## Domains and API keys
-
-`resend_domains_create` returns the DNS records to publish. `record` is the purpose (`SPF`, `DKIM`, `Receiving`, `Tracking`, `TrackingCAA`). `type` is the DNS type (`MX`, `TXT`, `CNAME`, `CAA`). Receiving stays off until `capabilities.receiving` is `"enabled"`. A domain list omits records; get and create include them. `resend_domains_verify` starts DNS checks. `resend_domains_update` changes tracking, TLS, and capabilities; pass NULL for a field to leave it. NULL `capabilities` leaves the object out; a zeroed one sends `{}` and the API decides. `region` is `us-east-1` (default), `eu-west-1`, `sa-east-1`, or `ap-northeast-1`. TLS mode and `custom_return_path` are inputs only; get and list can't report them, because the API doesn't return them.
-
-`resend_api_keys_create` takes `full_access` or `sending_access`. A sending key can be limited to one `domain_id`. `token` is present only on create. `resend_api_keys_update` renames a key; the response is only its id.
-
-## Logs
-
-`resend_logs_list` pages through recent API requests. `resend_logs_get` is the same record plus `request_body` and `response_body` as the raw JSON the API stored. A missing `response_status` is 0. `user_agent` is NULL when omitted.
-
-## Suppressions
-
-`resend_suppressions_add` takes an email. List can pass `origin` (`bounce`, `complaint`, `manual`); the client does not check the value. Get and remove take an id or an email. Batch add and batch remove take up to 100 addresses. Remove batch is emails or ids, not both. `source_id` is the email that bounced or complained, and NULL for a manual suppression.
-
-## Calls
-
-Lists take a `resend_page` (`after`, `before`, `limit`). NULL omits pagination. `after` and `before` cannot be combined. `limit` 0 omits the parameter. The API maximum is 100.
-
-| | |
-| --- | --- |
-| Emails | `resend_emails_send`, `resend_emails_send_batch`, `resend_emails_get`, `resend_emails_list`, `resend_emails_update`, `resend_emails_cancel`, `resend_emails_attachments_list`, `resend_emails_attachment_get` |
-| Receiving | `resend_receiving_get`, `resend_receiving_list`, `resend_receiving_attachments_list`, `resend_receiving_attachment_get`, `resend_download` |
-| Webhooks | `resend_webhook_verify` |
-| Domains | `resend_domains_create`, `resend_domains_get`, `resend_domains_list`, `resend_domains_verify`, `resend_domains_update`, `resend_domains_remove` |
-| API keys | `resend_api_keys_create`, `resend_api_keys_list`, `resend_api_keys_update`, `resend_api_keys_remove` |
-| Logs | `resend_logs_list`, `resend_logs_get` |
-| Suppressions | `resend_suppressions_add`, `resend_suppressions_list`, `resend_suppressions_get`, `resend_suppressions_remove`, `resend_suppressions_add_batch`, `resend_suppressions_remove_batch` |
+- `send_email` sends, then gets and lists.
+- `send_batch_email` sends a batch.
+- `schedule_email` schedules a send and cancels it.
+- `with_attachments` sends an inline attachment and a remote one.
+- `receiving` lists received mail, then gets and downloads.
+- `domains` creates a domain and prints its DNS records.
+- `api_keys` creates a key, lists, and removes it.
+- `webhook` verifies a signed body.
 
 ## Contract
 
-Request pointers belong to the caller for the length of the call. A result belongs to the caller until the matching `*_free`. One client is not shared across threads. `resend_last_error` lasts until the next call on that client. Webhook verify has no client, so it writes `resend_error` itself.
+Request pointers belong to the caller for the length of the call. A result belongs to the caller until the matching `*_free`. One client is not shared across threads. `resend_last_error` lasts until the next call on that client.
+
+Webhook verify takes the raw body and the `svix-id`, `svix-timestamp`, and `svix-signature` headers. It does not use an API key.
+
+Ordinary calls use a 30-second timeout, a 2-second connect timeout, and a 1 MiB body cap. Receiving get, logs get, and download allow more. Those limits are on the declarations in `resend.h`.
 
 ## Scope
 
-The API is larger than this library. What is here is the transactional path. The rest is not started, and pull requests are welcome.
+The API is larger than this library. What is here is the transactional path. The rest is not started, and pull requests are welcome. Sending with a published template id or `topic_id` is supported. Managing contacts, segments, topics, contact properties, broadcasts, and templates is not.
 
 | Area | Status |
 | --- | --- |
 | Emails, batch, receiving, attachments, webhook verify | Supported |
 | Domains, API keys, logs, suppressions | Supported |
 | Contacts, segments, topics, contact properties, broadcasts, templates | Not yet |
-| Automations, events, Inboxes, share links, domain claims, webhook endpoint management | Not yet |
+| Email metrics, automations, events, Inboxes, share links, domain claims, webhook endpoint management | Not yet |
 
 ## License
 
