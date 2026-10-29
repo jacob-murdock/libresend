@@ -3007,6 +3007,100 @@ static void test_webhook_verify(void) {
         }
         free(big);
     }
+
+    /* No trailing NUL. The cap stops before the next byte, then rejects. */
+    char *long_id = malloc(RESEND_WEBHOOK_ID_MAX + 1);
+    CHECK(long_id != NULL);
+    if (long_id) {
+        memset(long_id, 'a', RESEND_WEBHOOK_ID_MAX + 1);
+        memset(&event, 0, sizeof event);
+        memset(&err, 0, sizeof err);
+        rc = resend_webhook_verify(secret, long_id, "1", "v1,aa", body, strlen(body), &event, &err);
+        CHECK(rc == -1);
+        CHECK(event.type == NULL);
+        CHECK(strcmp(err.message, "webhook id too large") == 0);
+        free(long_id);
+    }
+    char *long_sig = malloc(RESEND_WEBHOOK_SIGNATURE_MAX + 1);
+    CHECK(long_sig != NULL);
+    if (long_sig) {
+        memset(long_sig, 'v', RESEND_WEBHOOK_SIGNATURE_MAX + 1);
+        memset(&event, 0, sizeof event);
+        memset(&err, 0, sizeof err);
+        rc = resend_webhook_verify(secret, svix_id, "1", long_sig, body, strlen(body), &event, &err);
+        CHECK(rc == -1);
+        CHECK(event.type == NULL);
+        CHECK(strcmp(err.message, "webhook signature too large") == 0);
+        free(long_sig);
+    }
+    char *long_sec = malloc(RESEND_WEBHOOK_SECRET_MAX + 1);
+    CHECK(long_sec != NULL);
+    if (long_sec) {
+        memset(long_sec, 'A', RESEND_WEBHOOK_SECRET_MAX + 1);
+        memset(&event, 0, sizeof event);
+        memset(&err, 0, sizeof err);
+        rc = resend_webhook_verify(long_sec, svix_id, "1", "v1,aa", body, strlen(body), &event, &err);
+        CHECK(rc == -1);
+        CHECK(event.type == NULL);
+        CHECK(strcmp(err.message, "webhook secret too large") == 0);
+        free(long_sec);
+    }
+
+    char id_max[RESEND_WEBHOOK_ID_MAX + 1];
+    memset(id_max, 'i', RESEND_WEBHOOK_ID_MAX);
+    id_max[RESEND_WEBHOOK_ID_MAX] = '\0';
+    now = (long)time(NULL);
+    sig = sign_v1(secret, id_max, now, body, strlen(body));
+    CHECK(sig != NULL);
+    if (sig) {
+        snprintf(ts, sizeof ts, "%ld", now);
+        memset(&event, 0, sizeof event);
+        memset(&err, 0, sizeof err);
+        rc = resend_webhook_verify(secret, id_max, ts, sig, body, strlen(body), &event, &err);
+        CHECK(rc == 0);
+        CHECK(event.type != NULL && strcmp(event.type, "email.sent") == 0);
+        resend_event_free(&event);
+
+        size_t sig_len = strlen(sig);
+        char *hdr = malloc(RESEND_WEBHOOK_SIGNATURE_MAX + 2);
+        CHECK(hdr != NULL && sig_len <= RESEND_WEBHOOK_SIGNATURE_MAX);
+        if (hdr && sig_len <= RESEND_WEBHOOK_SIGNATURE_MAX) {
+            size_t pad = RESEND_WEBHOOK_SIGNATURE_MAX - sig_len;
+            memset(hdr, ' ', pad);
+            memcpy(hdr + pad, sig, sig_len);
+            hdr[RESEND_WEBHOOK_SIGNATURE_MAX] = '\0';
+            memset(&event, 0, sizeof event);
+            rc = resend_webhook_verify(secret, id_max, ts, hdr, body, strlen(body), &event, &err);
+            CHECK(rc == 0);
+            resend_event_free(&event);
+            hdr[RESEND_WEBHOOK_SIGNATURE_MAX] = ' ';
+            hdr[RESEND_WEBHOOK_SIGNATURE_MAX + 1] = '\0';
+            memset(&event, 0, sizeof event);
+            rc = resend_webhook_verify(secret, id_max, ts, hdr, body, strlen(body), &event, &err);
+            CHECK(rc == -1);
+            CHECK(strcmp(err.message, "webhook signature too large") == 0);
+            free(hdr);
+        }
+        free(sig);
+    }
+
+    char sec_max[RESEND_WEBHOOK_SECRET_MAX + 1];
+    memcpy(sec_max, "whsec_", 6);
+    memset(sec_max + 6, 'A', RESEND_WEBHOOK_SECRET_MAX - 6);
+    sec_max[RESEND_WEBHOOK_SECRET_MAX] = '\0';
+    now = (long)time(NULL);
+    sig = sign_v1(sec_max, svix_id, now, body, strlen(body));
+    CHECK(sig != NULL);
+    if (sig) {
+        snprintf(ts, sizeof ts, "%ld", now);
+        memset(&event, 0, sizeof event);
+        memset(&err, 0, sizeof err);
+        rc = resend_webhook_verify(sec_max, svix_id, ts, sig, body, strlen(body), &event, &err);
+        CHECK(rc == 0);
+        CHECK(event.type != NULL && strcmp(event.type, "email.sent") == 0);
+        resend_event_free(&event);
+        free(sig);
+    }
 }
 
 /*

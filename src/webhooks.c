@@ -108,6 +108,17 @@ static int ct_equal(const char *a, size_t alen, const char *b, size_t blen) {
     return CRYPTO_memcmp(a, b, alen) == 0;
 }
 
+/* 1 when s has no NUL in the first max bytes. Reads at most max + 1. */
+static int longer_than(const char *s, size_t max) {
+    size_t n = 0;
+    while (s[n] != '\0') {
+        if (n == max)
+            return 1;
+        n++;
+    }
+    return 0;
+}
+
 /* Decimal unix seconds. A value that does not fit in int64_t is not a timestamp. */
 static int parse_timestamp(const char *s, int64_t *out) {
     if (!s || !s[0])
@@ -262,6 +273,18 @@ int resend_webhook_verify(const char *secret, const char *svix_id, const char *s
 
     if (body_len > RESEND_WEBHOOK_BODY_MAX) {
         webhook_err(err, "webhook body too large");
+        return -1;
+    }
+    if (longer_than(svix_id, RESEND_WEBHOOK_ID_MAX)) {
+        webhook_err(err, "webhook id too large");
+        return -1;
+    }
+    if (longer_than(svix_signature, RESEND_WEBHOOK_SIGNATURE_MAX)) {
+        webhook_err(err, "webhook signature too large");
+        return -1;
+    }
+    if (longer_than(secret, RESEND_WEBHOOK_SECRET_MAX)) {
+        webhook_err(err, "webhook secret too large");
         return -1;
     }
 

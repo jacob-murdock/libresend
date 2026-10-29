@@ -1,7 +1,7 @@
 /*
  * Deadline and body-cap constants. The suite does not sleep to prove them.
  * Ordinary calls, including emails get and lists: 1 MiB and a 30s total.
- * Webhook verify: 1 MiB, rejected before the HMAC allocation.
+ * Webhook verify: 1 MiB body, 256-byte id and secret, 4096-byte signature.
  * Receiving get: 128 MiB. Logs get and download: 64 MiB. Those three abort
  * after a 1 byte/s stall for 30s, and at a 300s ceiling.
  */
@@ -26,6 +26,9 @@ int test_limits(void) {
     CHECK(LIBRESEND_LOW_SPEED_LIMIT == 1);
     CHECK(LIBRESEND_BODY_MAX == 1024 * 1024);
     CHECK(RESEND_WEBHOOK_BODY_MAX == (size_t)1024 * 1024);
+    CHECK(RESEND_WEBHOOK_ID_MAX == (size_t)256);
+    CHECK(RESEND_WEBHOOK_SIGNATURE_MAX == (size_t)4096);
+    CHECK(RESEND_WEBHOOK_SECRET_MAX == (size_t)256);
     CHECK(LIBRESEND_LARGE_BODY_MAX == (size_t)64 * 1024 * 1024);
     CHECK(LIBRESEND_RECEIVING_BODY_MAX == (size_t)128 * 1024 * 1024);
 #undef CHECK
