@@ -77,8 +77,11 @@ so="$lib/libresend.so.$version"
 dyn=$(readelf -d "$so")
 printf '%s\n' "$dyn" | grep -q 'SONAME.*\[libresend\.so\.0\]' || fail "SONAME"
 printf '%s\n' "$dyn" | grep -q 'NEEDED.*\[libcurl\.so' || fail "libcurl is not a dynamic dependency"
-printf '%s\n' "$dyn" | grep -q 'NEEDED.*\[libssl\.so' || fail "libssl is not a dynamic dependency"
+# HMAC and EVP are libcrypto. libssl is unused, and --as-needed omits it.
 printf '%s\n' "$dyn" | grep -q 'NEEDED.*\[libcrypto\.so' || fail "libcrypto is not a dynamic dependency"
+if printf '%s\n' "$dyn" | grep -q 'NEEDED.*\[libssl\.so'; then
+    fail "libssl is an unused dynamic dependency"
+fi
 if printf '%s\n' "$dyn" | grep -E -q 'RPATH|RUNPATH'; then
     fail "RPATH would pin a shipped library"
 fi

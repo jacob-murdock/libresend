@@ -56,6 +56,7 @@ shared=$("$make_bin" -n -B "build/libresend.so.$version") || fail "dry-run share
 link=$(printf '%s\n' "$shared" | grep -F ' -shared ')
 [ -n "$link" ] || fail "no shared link line"
 need "$link" "-Wl,-z,defs -Wl,-z,relro,-z,now" "shared link lacks relro next to defs"
+need "$link" "-Wl,--as-needed" "shared link keeps unused -lssl"
 compiles=$(printf '%s\n' "$shared" | grep -F ' -c ' || true)
 lack "$compiles" "relro" "relro on a shared-library object compile"
 

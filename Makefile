@@ -63,8 +63,9 @@ $(BUILD)/pic/%.o: src/%.c include/resend.h src/internal.h | $(BUILD)/pic
 $(LIB): $(LIB_OBJS)
 	$(AR) rcs $@ $^
 
+# --as-needed drops -lssl. pkg-config lists it; the objects call libcrypto only.
 $(SO): $(PIC_OBJS)
-	$(CC) $(CFLAGS) -shared -Wl,-soname,libresend.so.0 -Wl,-z,defs -Wl,-z,relro,-z,now -o $@ $(PIC_OBJS) $(CURL_LIBS)
+	$(CC) $(CFLAGS) -shared -Wl,-soname,libresend.so.0 -Wl,-z,defs -Wl,-z,relro,-z,now -o $@ $(PIC_OBJS) -Wl,--as-needed $(CURL_LIBS)
 
 # Empty translation unit: header is self-contained under C99 -pedantic.
 $(HEADER_C99): include/resend.h | $(BUILD)
