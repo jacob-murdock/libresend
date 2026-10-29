@@ -498,12 +498,7 @@ static void test_redirect_follow(void) {
     fake_stop(f);
 }
 
-/*
- * 127.0.0.1 and localhost are different hosts. libcurl strips the custom
- * Authorization header on that hop unless CURLOPT_UNRESTRICTED_AUTH is set.
- * A scheme-relative Location stays on HTTP, so the header callback that
- * refuses an absolute http:// downgrade does not abort this follow.
- */
+/* Scheme-relative Location names another host. The other listener stays quiet. */
 static void test_redirect_other_host(void) {
     static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
     char raw[64];
@@ -543,12 +538,14 @@ static void test_redirect_other_host(void) {
 
     CHECK(resend_set_base_url(client, base) == 0);
     int rc = resend_emails_send(client, &message, &sent);
-    CHECK(rc == 0);
-    CHECK(sent.id != NULL && strcmp(sent.id, id) == 0);
+    CHECK(rc == -1);
+    CHECK(sent.id == NULL);
     CHECK(fake_request_count(src) == 1);
     CHECK(header_eq(src, "Authorization", "Bearer re_test"));
-    CHECK(fake_request_count(dest) == 1);
-    CHECK(fake_header(dest, "Authorization") == NULL);
+    CHECK(fake_request_count(dest) == 0);
+    const resend_error *err = resend_last_error(client);
+    CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "redirect refused") == 0);
 
     resend_sent_free(&sent);
     resend_free(client);
@@ -556,8 +553,8 @@ static void test_redirect_other_host(void) {
     fake_stop(dest);
 }
 
-/* Absolute http:// aimed at this fake. A follow would parse the id.
- * The fake is plain HTTP; this is the https-to-http stand-in. */
+/* An absolute Location is not followed, including same-host http://.
+ * A follow would parse the id. */
 static void test_redirect_drop_http(void) {
     static const char id[] = "49a3999c-0ce1-4ea6-ab68-afcd6dc2e794";
     char raw[64];
@@ -593,10 +590,39 @@ static void test_redirect_drop_http(void) {
     CHECK(fake_request_count(f) == 1);
     const resend_error *err = resend_last_error(client);
     CHECK(err != NULL && err->status == 0);
+    CHECK(err->message != NULL && strcmp(err->message, "redirect refused") == 0);
 
     resend_sent_free(&sent);
     resend_free(client);
     fake_stop(f);
+
+    /* Absolute https, and a leading "/\" that curl can read as "//". */
+    const char *blocked[] = {"https://example.com/emails", "/\\evil"};
+    for (size_t i = 0; i < sizeof blocked / sizeof blocked[0]; i++) {
+        fake_exchange once = {.status = 302, .body = "", .location = blocked[i]};
+        f = fake_start(&once, 1);
+        CHECK(f != NULL);
+        if (!f)
+            return;
+        snprintf(base, sizeof base, "http://127.0.0.1:%d", fake_port(f));
+        client = resend_init("re_test");
+        CHECK(client != NULL);
+        if (!client) {
+            fake_stop(f);
+            return;
+        }
+        CHECK(resend_set_base_url(client, base) == 0);
+        sent.id = NULL;
+        rc = resend_emails_send(client, &message, &sent);
+        CHECK(rc == -1);
+        CHECK(sent.id == NULL);
+        CHECK(fake_request_count(f) == 1);
+        err = resend_last_error(client);
+        CHECK(err != NULL && err->status == 0);
+        CHECK(err->message != NULL && strcmp(err->message, "redirect refused") == 0);
+        resend_free(client);
+        fake_stop(f);
+    }
 }
 
 /* Location on a 2xx is not a redirect. The send already happened. */

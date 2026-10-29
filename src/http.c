@@ -164,7 +164,7 @@ struct write_ctx {
 
 struct header_ctx {
     int status;
-    int drop_to_http;
+    int refuse_redirect;
 };
 
 static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *userdata) {
@@ -204,11 +204,26 @@ static int http_status_line(const char *buf, size_t n) {
     return (buf[i] - '0') * 100 + (buf[i + 1] - '0') * 10 + (buf[i + 2] - '0');
 }
 
-/* Absolute http:// on a 3xx is a drop off HTTPS (and refused on HTTP too),
- * so a same-host hop never sends the key in clear. CURLOPT_UNRESTRICTED_AUTH
- * is never set: a follow to another host drops Authorization. A Location on
- * any other status is not a redirect: aborting would drop a response the
- * server already produced. Relative and https:// targets are followed. */
+/* A 3xx is followed only for a same-origin path: one leading slash, and not
+ * "//" or "/\". Absolute and scheme-relative targets are refused here, so the
+ * API key and a replayed body never depend on libcurl's host check. A Location
+ * on any other status is not a redirect. */
+static int same_origin_location(const char *v, const char *end) {
+    while (v < end && (*v == ' ' || *v == '\t'))
+        v++;
+    while (end > v && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n'))
+        end--;
+    if (v >= end || *v != '/')
+        return 0;
+    if ((size_t)(end - v) >= 2 && (v[1] == '/' || v[1] == '\\'))
+        return 0;
+    for (const char *p = v; p < end; p++) {
+        if (*p == '\\')
+            return 0;
+    }
+    return 1;
+}
+
 static size_t header_cb(char *buf, size_t size, size_t nitems, void *userdata) {
     struct header_ctx *ctx = userdata;
     size_t n = size * nitems;
@@ -220,12 +235,8 @@ static size_t header_cb(char *buf, size_t size, size_t nitems, void *userdata) {
     if (ctx->status < 300 || ctx->status >= 400)
         return n;
     if (n >= 9 && resend_ascii_ncasecmp(buf, "Location:", 9) == 0) {
-        const char *v = buf + 9;
-        const char *end = buf + n;
-        while (v < end && (*v == ' ' || *v == '\t'))
-            v++;
-        if ((size_t)(end - v) >= 7 && resend_ascii_ncasecmp(v, "http://", 7) == 0) {
-            ctx->drop_to_http = 1;
+        if (!same_origin_location(buf + 9, buf + n)) {
+            ctx->refuse_redirect = 1;
             return 0;
         }
     }
@@ -394,7 +405,7 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
     }
 
     struct write_ctx wctx = {.body = &out->body, .max = body_max, .overflow = 0};
-    struct header_ctx hctx = {.status = 0, .drop_to_http = 0};
+    struct header_ctx hctx = {.status = 0, .refuse_redirect = 0};
 
     curl_easy_setopt(easy, CURLOPT_URL, url);
     /* Ids that are `.` or `..` are already rejected. Keep the path we built. */
@@ -430,8 +441,8 @@ int resend_http_json_limit(resend *client, const char *method, const char *path,
     curl_easy_cleanup(easy);
     free(url);
 
-    if (hctx.drop_to_http) {
-        resend_error_set(client, 0, NULL, "redirect to http refused");
+    if (hctx.refuse_redirect) {
+        resend_error_set(client, 0, NULL, "redirect refused");
         resend_http_response_free(out);
         return -1;
     }
